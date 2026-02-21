@@ -66,3 +66,22 @@
 **Status:** Pending visual verification
 
 ---
+
+### Structured Logging Utility
+**Files created:**
+- src/lib/logger.ts — Structured JSON logger with DEBUG/INFO/WARN/ERROR/FATAL levels
+
+**Files modified:**
+- .env — Added VITE_LOG_LEVEL=DEBUG
+
+**Features:**
+- Environment-agnostic: detects import.meta.env (Vite/browser) with process.env (Node.js) fallback
+- setContext() for persistent context (userId, orgId) auto-attached to every log entry
+- clearContext() to reset persistent context
+- Min log level via VITE_LOG_LEVEL env var (defaults to DEBUG in dev, INFO in production)
+- Outputs structured JSON: { level, event, timestamp, context, metadata }
+- Exports: default singleton + named Logger class for testing
+
+**Status:** Reviewed and approved ✓
+
+---
