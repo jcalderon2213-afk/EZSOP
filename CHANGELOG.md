@@ -104,3 +104,29 @@
 **Status:** Verified visually in browser ✓
 
 ---
+
+### Auth Context, Route Guards & Onboarding Check
+**Files created:**
+- src/contexts/AuthContext.tsx — AuthProvider + useAuth hook, Supabase onAuthStateChange, auto-create user profile in `users` table, exposes session/userProfile/loading/signOut
+- src/components/LoadingScreen.tsx — Full-screen EZSOP logo with pulse animation while auth resolves
+- src/components/auth/ProtectedRoute.tsx — Redirects to /login if no session, to /onboarding if no org_id (requireOrg prop)
+- src/components/auth/AuthRoute.tsx — Redirects logged-in users to /dashboard (blocks access to auth pages)
+- src/pages/OnboardingPage.tsx — Placeholder for business profile setup wizard
+
+**Files modified:**
+- src/App.tsx — Wrapped in AuthProvider, auth routes in AuthRoute, /onboarding in ProtectedRoute(requireOrg=false), app routes in ProtectedRoute
+
+**Route guard logic:**
+- Not logged in → /login
+- Logged in, no org_id → /onboarding
+- Logged in, has org_id → app routes
+- Already logged in visiting /login or /signup → /dashboard
+
+**Structured log events:**
+- auth_session_restored, auth_session_ended
+- user_profile_fetched, user_profile_created
+- auth_guard_redirect (with from/to paths)
+
+**Status:** Pending visual verification
+
+---
