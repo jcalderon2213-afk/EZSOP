@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /c/Users/JONLAPTOP/EZSOP && npm create vite@latest . -- --template react-ts 2>&1)",
+      "Bash(cd /c/Users/JONLAPTOP/EZSOP && echo \"y\" | npm create vite@latest . -- --template react-ts 2>&1)",
+      "Bash(ls:*)",
+      "Bash(cd /c/Users/JONLAPTOP/EZSOP && npm install 2>&1)",
+      "Bash(cd /c/Users/JONLAPTOP/EZSOP && npm install tailwindcss @tailwindcss/vite 2>&1)",
+      "Bash(cd /c/Users/JONLAPTOP/EZSOP && npx tsc --noEmit 2>&1)",
+      "Bash(cd /c/Users/JONLAPTOP/EZSOP && npx vite build 2>&1)",
+      "Bash(cd:*)",
+      "Bash(cd /c/Users/JONLAPTOP/EZSOP && npm run dev 2>&1)"
+    ]
+  }
+}
