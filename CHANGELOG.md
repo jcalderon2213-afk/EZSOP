@@ -130,3 +130,11 @@
 **Status:** Pending visual verification
 
 ---
+
+### Schema Update: orgs.industry_label → industry_type + industry_custom_label
+**Migration:** Manual SQL (not in code)
+- Removed `industry_label` (TEXT) column from `orgs` table
+- Added `industry_type` (TEXT) — stores the selected industry category
+- Added `industry_custom_label` (TEXT, nullable) — stores custom label when industry_type is "Other"
+
+---

@@ -554,10 +554,13 @@ export default function OnboardingPage() {
               {governingBodies.length === 0 ? (
                 <p className="text-sm text-text-muted">None &mdash; confirmed by user</p>
               ) : (
-                <ul className="space-y-1.5 text-sm">
+                <ul className="space-y-2 text-sm">
                   {governingBodies.map((gb, i) => (
-                    <li key={i} className="text-text">
-                      <span className="font-500">{gb.name}</span>
+                    <li
+                      key={i}
+                      className="rounded-sm border border-card-border bg-card px-4 py-2.5"
+                    >
+                      <span className="font-500 text-text">{gb.name}</span>
                       <span className="ml-2 text-text-muted">({gb.level})</span>
                       {gb.url && (
                         <span className="ml-2 text-text-light">{gb.url}</span>
