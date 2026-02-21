@@ -208,6 +208,7 @@ export default function OnboardingPage() {
           state: usState,
           county: county.trim(),
           city: city.trim(),
+          created_by: userProfile!.id,
         })
         .select()
         .single();

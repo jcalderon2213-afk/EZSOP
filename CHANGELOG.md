@@ -138,3 +138,20 @@
 - Added `industry_custom_label` (TEXT, nullable) — stores custom label when industry_type is "Other"
 
 ---
+
+### Phase 2 Step 7: RLS Policies + created_by on Org Creation
+**Files created:**
+- sql/rls-policies.sql — Full RLS policy script for manual execution in Supabase SQL Editor
+
+**Files modified:**
+- src/pages/OnboardingPage.tsx — Added created_by: userProfile.id to orgs insert
+
+**RLS policies:**
+- Helper function: get_user_org_id() returns current user's org_id
+- orgs: SELECT (org member or creator), INSERT (created_by = self), UPDATE (org member), DELETE (creator only)
+- users: SELECT (own row or org members), INSERT (own row), UPDATE (own row)
+- governing_bodies: SELECT/UPDATE/DELETE (org member), INSERT (org member OR org creator for onboarding race condition)
+
+**Status:** Pending — SQL must be run manually in Supabase SQL Editor
+
+---
