@@ -14,10 +14,21 @@ import PracticeModePage from "./pages/PracticeModePage";
 import PracticeChatPage from "./pages/PracticeChatPage";
 import PracticeDebriefPage from "./pages/PracticeDebriefPage";
 import ComplianceLogPage from "./pages/ComplianceLogPage";
+import LoginPage from "./pages/LoginPage";
+import SignupPage from "./pages/SignupPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 function App() {
   return (
     <Routes>
+      {/* Auth routes — no AppShell */}
+      <Route path="login" element={<LoginPage />} />
+      <Route path="signup" element={<SignupPage />} />
+      <Route path="forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="reset-password" element={<ResetPasswordPage />} />
+
+      {/* App routes — wrapped in AppShell */}
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />

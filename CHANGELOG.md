@@ -85,3 +85,22 @@
 **Status:** Reviewed and approved ✓
 
 ---
+
+### Auth Pages
+**Files created:**
+- src/pages/LoginPage.tsx — Email + password form, Supabase signInWithPassword, signup success banner
+- src/pages/SignupPage.tsx — Email + password + confirm, client-side validation, Supabase signUp
+- src/pages/ForgotPasswordPage.tsx — Email-only form, Supabase resetPasswordForEmail, confirmation message
+- src/pages/ResetPasswordPage.tsx — New password + confirm, Supabase updateUser
+
+**Files modified:**
+- src/App.tsx — Added 4 auth routes outside AppShell wrapper (no sidebar/topbar)
+
+**Details:**
+- All pages: centered card layout on cream bg, EZSOP logo in Fraunces, design token styling
+- Structured logger integration: auth_login_*, auth_signup_*, auth_forgot_password_*, auth_reset_password_*
+- Routes: /login, /signup, /forgot-password, /reset-password
+
+**Status:** Verified visually in browser ✓
+
+---
