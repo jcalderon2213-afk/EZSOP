@@ -1,9 +1,11 @@
+import AppShell from "./components/layout/AppShell";
+
 function App() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <h1 className="text-4xl font-bold">EZSOP</h1>
-    </div>
-  )
+    <AppShell>
+      <h1 className="text-2xl font-600 text-text">Dashboard</h1>
+    </AppShell>
+  );
 }
 
-export default App
+export default App;
