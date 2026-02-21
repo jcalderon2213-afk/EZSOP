@@ -1,1 +1,46 @@
 @import "tailwindcss";
+
+@theme {
+  /* Colors */
+  --color-bg: #FAF7F2;
+  --color-sidebar-bg: #2C2520;
+  --color-sidebar-text: #E8DFD4;
+  --color-sidebar-hover: #3E3630;
+  --color-sidebar-active: #5B4F44;
+  --color-card: #FFFFFF;
+  --color-card-border: #E8E0D6;
+  --color-text: #2C2520;
+  --color-text-muted: #8A7E74;
+  --color-text-light: #B0A69C;
+  --color-primary: #D4764E;
+  --color-primary-hover: #C0633B;
+  --color-primary-light: #FFF0E8;
+  --color-accent: #4A8B6E;
+  --color-accent-light: #E6F3EC;
+  --color-accent-hover: #3D7A5E;
+  --color-warn: #C9544A;
+  --color-warn-light: #FDEAE8;
+  --color-info: #5B8DB8;
+  --color-info-light: #E8F1F8;
+  --color-purple: #7B6BA1;
+  --color-purple-light: #F0ECF6;
+
+  /* Fonts */
+  --font-body: "DM Sans", sans-serif;
+  --font-display: "Fraunces", serif;
+
+  /* Border Radius */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-xs: 6px;
+
+  /* Box Shadows */
+  --shadow: 0 1px 3px rgba(44, 37, 32, 0.08), 0 4px 12px rgba(44, 37, 32, 0.04);
+  --shadow-lg: 0 4px 16px rgba(44, 37, 32, 0.1), 0 12px 40px rgba(44, 37, 32, 0.06);
+}
+
+body {
+  background-color: var(--color-bg);
+  font-family: var(--font-body);
+  color: var(--color-text);
+}
