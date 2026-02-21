@@ -32,3 +32,37 @@
 **Status:** Verified visually in browser ✓
 
 ---
+
+### Step 3: Route Tree, Nav Links, Breadcrumbs & Placeholder Pages
+**Files created (14 pages):**
+- src/pages/DashboardPage.tsx
+- src/pages/SOPLibraryPage.tsx
+- src/pages/SOPDetailPage.tsx — reads :id param
+- src/pages/CreateSOPPage.tsx — stepper bar (Context → Voice → Transcript → Draft → Compliance) + Outlet
+- src/pages/ContextUploadPage.tsx
+- src/pages/VoiceCapturePage.tsx
+- src/pages/TranscriptReviewPage.tsx
+- src/pages/DraftEditorPage.tsx
+- src/pages/ComplianceAuditPage.tsx
+- src/pages/BusinessProfilePage.tsx
+- src/pages/PracticeModePage.tsx
+- src/pages/PracticeChatPage.tsx — reads :scenarioId param
+- src/pages/PracticeDebriefPage.tsx — reads :scenarioId param
+- src/pages/ComplianceLogPage.tsx
+
+**Files modified:**
+- src/App.tsx — Full route tree with React Router (/ redirects to /dashboard, nested create SOP sub-routes)
+- src/components/layout/AppShell.tsx — children prop replaced with Outlet, page-enter animation on route change
+- src/components/layout/Sidebar.tsx — buttons replaced with NavLink, custom active detection (SOP Library vs Create SOP)
+- src/components/layout/TopBar.tsx — Dynamic breadcrumbs from URL segments with label map, chevron separators, clickable links
+- src/index.css — Added page-enter keyframe animation (opacity + translateY, 300ms)
+
+**Route tree:**
+- / → redirect to /dashboard
+- /dashboard, /sops, /sops/:id, /profile, /practice, /compliance
+- /sops/create with 5 nested sub-steps (context, voice, transcript, draft, compliance)
+- /practice/:scenarioId, /practice/:scenarioId/debrief
+
+**Status:** Pending visual verification
+
+---

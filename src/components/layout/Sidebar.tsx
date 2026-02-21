@@ -1,8 +1,11 @@
+import { NavLink, useLocation } from "react-router-dom";
+
 const navGroups = [
   {
     items: [
       {
         label: "Dashboard",
+        to: "/dashboard",
         icon: (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z" />
@@ -12,6 +15,7 @@ const navGroups = [
       },
       {
         label: "SOP Library",
+        to: "/sops",
         icon: (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
@@ -21,6 +25,7 @@ const navGroups = [
       },
       {
         label: "Create SOP",
+        to: "/sops/create",
         icon: (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10" />
@@ -30,6 +35,7 @@ const navGroups = [
       },
       {
         label: "Business Profile",
+        to: "/profile",
         icon: (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
@@ -43,6 +49,7 @@ const navGroups = [
     items: [
       {
         label: "Practice Mode",
+        to: "/practice",
         icon: (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2v10z" />
@@ -56,6 +63,7 @@ const navGroups = [
     items: [
       {
         label: "Compliance Log",
+        to: "/compliance",
         icon: (
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -66,7 +74,17 @@ const navGroups = [
   },
 ];
 
+function checkActive(to: string, pathname: string): boolean {
+  if (to === "/sops") {
+    // Active for /sops and /sops/:id, but NOT /sops/create
+    return pathname === "/sops" || (pathname.startsWith("/sops/") && !pathname.startsWith("/sops/create"));
+  }
+  return pathname === to || pathname.startsWith(to + "/");
+}
+
 export default function Sidebar() {
+  const { pathname } = useLocation();
+
   return (
     <aside className="fixed top-0 left-0 z-30 flex h-screen w-[260px] flex-col bg-sidebar-bg text-sidebar-text -translate-x-full lg:translate-x-0 transition-transform">
       {/* Logo */}
@@ -86,19 +104,24 @@ export default function Sidebar() {
               <div className="mx-2 my-2 h-px bg-white/10" />
             )}
             <ul className="space-y-0.5">
-              {group.items.map((item) => (
-                <li key={item.label}>
-                  <button
-                    type="button"
-                    className={`flex w-full items-center gap-3 rounded-sm px-3.5 py-3 text-sm font-500 transition-colors hover:bg-sidebar-hover ${
-                      item.color ?? ""
-                    }`}
-                  >
-                    {item.icon}
-                    {item.label}
-                  </button>
-                </li>
-              ))}
+              {group.items.map((item) => {
+                const active = checkActive(item.to, pathname);
+                return (
+                  <li key={item.label}>
+                    <NavLink
+                      to={item.to}
+                      className={`flex w-full items-center gap-3 rounded-sm px-3.5 py-3 text-sm font-500 transition-colors ${
+                        active
+                          ? "bg-sidebar-active text-white"
+                          : `hover:bg-sidebar-hover ${item.color ?? ""}`
+                      }`}
+                    >
+                      {item.icon}
+                      {item.label}
+                    </NavLink>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}
