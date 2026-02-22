@@ -8,6 +8,7 @@ import DashboardPage from "./pages/DashboardPage";
 import SOPLibraryPage from "./pages/SOPLibraryPage";
 import SOPDetailPage from "./pages/SOPDetailPage";
 import CreateSOPPage from "./pages/CreateSOPPage";
+import CustomCreateSOPPage from "./pages/CustomCreateSOPPage";
 import ContextUploadPage from "./pages/ContextUploadPage";
 import VoiceCapturePage from "./pages/VoiceCapturePage";
 import TranscriptReviewPage from "./pages/TranscriptReviewPage";
@@ -49,6 +50,7 @@ function App() {
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="sops" element={<SOPLibraryPage />} />
             <Route path="sops/:id" element={<SOPDetailPage />} />
+            <Route path="sops/create/custom" element={<CustomCreateSOPPage />} />
             <Route path="sops/create" element={<CreateSOPPage />}>
               <Route index element={<Navigate to="context" replace />} />
               <Route path="context" element={<ContextUploadPage />} />
