@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
 import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "../contexts/ToastContext";
 
 const FREQUENCIES = [
   "Daily",
@@ -19,6 +20,7 @@ const inputClass =
 export default function CreateSOPPage() {
   const navigate = useNavigate();
   const { userProfile } = useAuth();
+  const { showToast } = useToast();
 
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
@@ -50,11 +52,13 @@ export default function CreateSOPPage() {
     if (insertError) {
       logger.error("sop_create_error", { message: insertError.message });
       setError(insertError.message);
+      showToast(insertError.message, "error");
       setSaving(false);
       return;
     }
 
     logger.info("sop_create_success", { sopId: data.id });
+    showToast("SOP created", "success");
     navigate(`/sops/${data.id}`, { replace: true });
   }
 

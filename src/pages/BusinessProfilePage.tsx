@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
 import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "../contexts/ToastContext";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -113,6 +114,7 @@ const btnSecondary =
 
 export default function BusinessProfilePage() {
   const { userProfile } = useAuth();
+  const { showToast } = useToast();
 
   // Data
   const [org, setOrg] = useState<Org | null>(null);
@@ -293,6 +295,7 @@ export default function BusinessProfilePage() {
         orgId: org.id,
         gbCount: editGBs.length,
       });
+      showToast("Profile updated", "success");
 
       // 4. Re-fetch and exit edit mode
       setEditing(false);
@@ -303,6 +306,7 @@ export default function BusinessProfilePage() {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("profile_update_error", { orgId: org.id, message });
       setError(message);
+      showToast(message, "error");
       setSaving(false);
     }
   }

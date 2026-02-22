@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
+import { useToast } from "../contexts/ToastContext";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ function formatDate(iso: string): string {
 export default function SOPDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { showToast } = useToast();
 
   // SOP state
   const [sop, setSop] = useState<SOP | null>(null);
@@ -193,11 +195,13 @@ export default function SOPDetailPage() {
     if (updateError) {
       logger.error("sop_detail_update_error", { message: updateError.message });
       setSaveError(updateError.message);
+      showToast(updateError.message, "error");
       setSaving(false);
       return;
     }
 
     logger.info("sop_detail_update_success", { sopId: sop.id });
+    showToast("Changes saved", "success");
     setSop(data as SOP);
     setEditing(false);
     setSaving(false);
@@ -220,11 +224,13 @@ export default function SOPDetailPage() {
 
     if (insertError) {
       logger.error("sop_step_create_error", { message: insertError.message });
+      showToast(insertError.message, "error");
       setAddSaving(false);
       return;
     }
 
     logger.info("sop_step_create_success", { sopId: id, stepNumber });
+    showToast("Step added", "success");
     setAddTitle("");
     setAddDescription("");
     setAddingStep(false);
@@ -257,11 +263,13 @@ export default function SOPDetailPage() {
 
     if (updateError) {
       logger.error("sop_step_update_error", { message: updateError.message });
+      showToast(updateError.message, "error");
       setStepSaving(false);
       return;
     }
 
     logger.info("sop_step_update_success", { stepId });
+    showToast("Step updated", "success");
     setEditingStepId(null);
     setStepSaving(false);
     await fetchSteps();
@@ -277,10 +285,12 @@ export default function SOPDetailPage() {
 
     if (deleteError) {
       logger.error("sop_step_delete_error", { message: deleteError.message });
+      showToast(deleteError.message, "error");
       return;
     }
 
     logger.info("sop_step_delete_success", { stepId });
+    showToast("Step deleted", "success");
     await fetchSteps();
   }
 
@@ -301,11 +311,14 @@ export default function SOPDetailPage() {
     if (updateError) {
       logger.error("sop_status_change_error", { message: updateError.message });
       setSaveError(updateError.message);
+      showToast(updateError.message, "error");
       setActionLoading(false);
       return;
     }
 
+    const actionLabel = newStatus === "published" ? "published" : newStatus === "archived" ? "archived" : "unarchived";
     logger.info("sop_status_change_success", { sopId: sop.id, from: fromStatus, to: newStatus });
+    showToast(`SOP ${actionLabel}`, "success");
     setSop(data as SOP);
     setActionLoading(false);
   }
@@ -322,11 +335,13 @@ export default function SOPDetailPage() {
     if (deleteError) {
       logger.error("sop_delete_error", { message: deleteError.message });
       setSaveError(deleteError.message);
+      showToast(deleteError.message, "error");
       setActionLoading(false);
       return;
     }
 
     logger.info("sop_delete_success", { sopId: sop.id });
+    showToast("SOP deleted", "success");
     navigate("/sops", { replace: true });
   }
 
@@ -345,6 +360,7 @@ export default function SOPDetailPage() {
 
     if (errA) {
       logger.error("sop_step_reorder_error", { message: errA.message });
+      showToast(errA.message, "error");
       return;
     }
 
@@ -355,6 +371,7 @@ export default function SOPDetailPage() {
 
     if (errB) {
       logger.error("sop_step_reorder_error", { message: errB.message });
+      showToast(errB.message, "error");
       return;
     }
 
@@ -363,6 +380,7 @@ export default function SOPDetailPage() {
       stepBId: stepB.id,
       direction,
     });
+    showToast("Step reordered", "success");
     await fetchSteps();
   }
 

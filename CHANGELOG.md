@@ -227,3 +227,18 @@
 **Status:** Pending visual verification
 
 ---
+
+### Wire Toast Notifications into Pages
+**Files modified:**
+- src/pages/CreateSOPPage.tsx — success toast on create, error toast on failure (2 calls)
+- src/pages/SOPDetailPage.tsx — success/error toasts for: save edits, publish, archive, unarchive, delete SOP, add/edit/delete/reorder steps (14 calls)
+- src/pages/BusinessProfilePage.tsx — success toast on profile save, error toast on failure (2 calls)
+
+**Notes:**
+- All existing logger events preserved — toasts are user-facing, logger is developer observability
+- All existing inline error displays preserved — toasts supplement them
+- Total: 18 showToast calls across 3 files
+
+**Status:** Pending visual verification
+
+---
