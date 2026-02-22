@@ -53,7 +53,6 @@ function App() {
               <Route index element={<Navigate to="context" replace />} />
               <Route path="context" element={<ContextUploadPage />} />
               <Route path="voice" element={<VoiceCapturePage />} />
-              <Route path="transcript" element={<TranscriptReviewPage />} />
               <Route path="draft" element={<DraftEditorPage />} />
               <Route path="compliance" element={<ComplianceAuditPage />} />
             </Route>

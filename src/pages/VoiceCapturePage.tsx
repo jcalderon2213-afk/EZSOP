@@ -180,7 +180,7 @@ export default function VoiceCapturePage() {
       charCount: text.trim().length,
     });
 
-    navigate(`/sops/${id}/build/transcript`);
+    navigate(`/sops/${id}/build/draft`);
   }
 
   // ── Render ──────────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ export default function VoiceCapturePage() {
         {sopTitle || "Voice Capture"}
       </h1>
       <p className="mt-1 text-sm text-text-muted">
-        Describe your process by typing or speaking.
+        Record, type, or edit your process description.
       </p>
 
       <div className="mt-6 max-w-[700px]">
@@ -278,7 +278,7 @@ export default function VoiceCapturePage() {
         {/* ── Actions ────────────────────────────────────────────────── */}
         <div className="mt-6 flex items-center justify-between">
           <Link
-            to={`/sops/${id}/build/transcript`}
+            to={`/sops/${id}/build/draft`}
             className="text-sm text-text-muted transition-colors hover:text-text"
           >
             Skip
@@ -288,7 +288,7 @@ export default function VoiceCapturePage() {
             onClick={handleContinue}
             className="rounded-sm bg-primary px-6 py-2.5 text-sm font-600 text-white transition-colors hover:bg-primary-hover"
           >
-            Continue
+            Generate Draft →
           </button>
         </div>
       </div>

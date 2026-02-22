@@ -1,4 +1,4 @@
-const DEFAULT_STEPS = ["Context", "Voice", "Transcript", "Draft", "Compliance"];
+const DEFAULT_STEPS = ["Context", "Capture", "Draft", "Compliance"];
 
 interface BuildStepperProps {
   currentStep: number;

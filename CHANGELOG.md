@@ -257,3 +257,17 @@
 **Status:** Pending visual verification
 
 ---
+
+### Simplify Build Stepper: 5 steps → 4 steps (merge Voice + Transcript into Capture)
+**Files modified:**
+- src/components/BuildStepper.tsx — Default steps changed to ["Context", "Capture", "Draft", "Compliance"]
+- src/pages/VoiceCapturePage.tsx — Subtitle updated, "Continue" → "Generate Draft →", navigate targets changed from /transcript to /draft, Skip also goes to /draft
+- src/App.tsx — Removed /sops/:id/build/transcript route from build group
+
+**Notes:**
+- TranscriptReviewPage.tsx left as-is (unrouted, kept for potential future use)
+- ContextUploadPage.tsx unchanged (already correct at currentStep=0)
+
+**Status:** Pending visual verification
+
+---
