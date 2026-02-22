@@ -155,3 +155,58 @@
 **Status:** Pending — SQL must be run manually in Supabase SQL Editor
 
 ---
+
+### Phase 3 Step 2: SOP Library Page
+**Files modified:**
+- src/pages/SOPLibraryPage.tsx — Full rewrite: fetch SOPs, responsive card grid, status badges, empty state, loading
+
+**Status:** Verified ✓
+
+---
+
+### Phase 3 Step 3: SOP Create Form
+**Files modified:**
+- src/pages/CreateSOPPage.tsx — Full rewrite: title/category/purpose/frequency form, inserts draft SOP, navigates to detail
+
+**Status:** Verified ✓
+
+---
+
+### Phase 3 Step 4: SOP Detail Page
+**Files modified:**
+- src/pages/SOPDetailPage.tsx — Full rewrite: fetch SOP, read-only view, inline edit mode, Supabase save
+
+**Status:** Verified ✓
+
+---
+
+### Phase 3 Step 5: SOP Step Editor
+**Files modified:**
+- src/pages/SOPDetailPage.tsx — Added steps section: add, edit, delete (soft), reorder (Move Up/Move Down)
+
+**Status:** Verified ✓
+
+---
+
+### Phase 3 Step 6: SOP Lifecycle Actions
+**Files modified:**
+- src/pages/SOPDetailPage.tsx — Added publish/archive/unarchive/delete lifecycle buttons with inline confirmation
+
+**Status:** Verified ✓
+
+---
+
+### Phase 3 Step 7: Business Profile Page
+**Files modified:**
+- src/pages/BusinessProfilePage.tsx — Full rewrite: fetch org + governing bodies, read-only view with detail cards, edit mode with all onboarding fields, save via soft-delete-all + re-insert for governing bodies
+
+**Features:**
+- Read-only view: Business Info card (org name, industry, location) + Governing Bodies card with bordered rows
+- Edit mode: same fields as onboarding wizard (org name, industry dropdown, state/county/city, governing bodies add/remove)
+- Governing body URLs rendered as clickable links in read-only view
+- Save: updates org row, soft-deletes existing governing bodies, inserts new ones, re-fetches
+- Logger events: profile_fetch_success/error, profile_update_attempt/success/error
+
+**Status:** Pending visual verification
+
+---
