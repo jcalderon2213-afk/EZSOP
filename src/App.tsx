@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
+import { ToastProvider } from "./contexts/ToastContext";
 import AuthRoute from "./components/auth/AuthRoute";
 import ProtectedRoute from "./components/auth/ProtectedRoute";
 import AppShell from "./components/layout/AppShell";
@@ -26,6 +27,7 @@ import OnboardingPage from "./pages/OnboardingPage";
 function App() {
   return (
     <AuthProvider>
+      <ToastProvider>
       <Routes>
         {/* Auth routes — redirect to /dashboard if logged in */}
         <Route element={<AuthRoute />}>
@@ -63,6 +65,7 @@ function App() {
           </Route>
         </Route>
       </Routes>
+      </ToastProvider>
     </AuthProvider>
   );
 }

@@ -210,3 +210,20 @@
 **Status:** Pending visual verification
 
 ---
+
+### Toast Notification System
+**Files created:**
+- src/contexts/ToastContext.tsx — ToastProvider + useToast() hook, auto-dismiss after 4s, exit animation, multiple simultaneous toasts
+- src/components/ToastContainer.tsx — Fixed bottom-center stack, left color accent bar per type (success/error/warning/info), close button
+
+**Files modified:**
+- src/index.css — Added toast-enter (slide-up 300ms) and toast-exit (fade-out 200ms) keyframe animations
+- src/App.tsx — Wrapped Routes in ToastProvider (inside AuthProvider)
+
+**Usage:**
+- `const { showToast } = useToast()`
+- `showToast("Message", "success" | "error" | "warning" | "info")`
+
+**Status:** Pending visual verification
+
+---
