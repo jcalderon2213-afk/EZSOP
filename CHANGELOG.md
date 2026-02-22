@@ -271,3 +271,28 @@
 **Status:** Pending visual verification
 
 ---
+
+### Phase 4 Step 10: AI Draft Generation + DraftEditorPage
+**Files modified:**
+- supabase/functions/ai-gateway/index.ts — Added "generate-sop-steps" action: takes transcript + context links + regulation text + SOP title, calls Claude to generate structured steps as JSON array of { step_number, title, description }
+- src/pages/DraftEditorPage.tsx — Full rewrite: fetches SOP + existing steps, auto-generates via AI if none exist, step cards with inline edit/reorder/delete/add, BuildStepper at step 3 (Draft), "Continue to Compliance →" navigation
+
+**AI generate-sop-steps action:**
+- Input: transcript (required), context_links, regulation_text, sop_title
+- System prompt: SOP writing expert, actionable steps, valid JSON only
+- Model: claude-sonnet-4-20250514, max_tokens 2048
+- Output: { success: true, data: { steps: [...] } }
+
+**DraftEditorPage features:**
+- Auto-generates steps from localStorage (sop-voice-{id}, sop-context-{id}) on first visit
+- Spinner loading state during generation, error state with Retry button
+- Step cards: number badge, title, description, Edit/Delete/Move Up/Move Down
+- Inline editing with Save/Cancel
+- "+ Add Step" for manual additions
+- All operations persist to sop_steps table
+
+**Logger events:** draft_generate_start/success/error, draft_step_edit, draft_step_reorder, draft_step_delete, draft_step_add
+
+**Status:** Pending visual verification
+
+---
