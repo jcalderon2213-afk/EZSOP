@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
 
@@ -64,6 +64,7 @@ function formatDate(iso: string): string {
 
 export default function SOPDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
 
   // SOP state
   const [sop, setSop] = useState<SOP | null>(null);
@@ -89,6 +90,10 @@ export default function SOPDetailPage() {
   const [addTitle, setAddTitle] = useState("");
   const [addDescription, setAddDescription] = useState("");
   const [addSaving, setAddSaving] = useState(false);
+
+  // Lifecycle actions
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
   // Edit step
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
@@ -279,6 +284,52 @@ export default function SOPDetailPage() {
     await fetchSteps();
   }
 
+  // ── SOP Lifecycle Actions ────────────────────────────────────────────────────
+
+  async function handleStatusChange(newStatus: "draft" | "published" | "archived") {
+    if (!sop) return;
+    setActionLoading(true);
+    const fromStatus = sop.status;
+
+    const { data, error: updateError } = await supabase
+      .from("sops")
+      .update({ status: newStatus })
+      .eq("id", sop.id)
+      .select()
+      .single();
+
+    if (updateError) {
+      logger.error("sop_status_change_error", { message: updateError.message });
+      setSaveError(updateError.message);
+      setActionLoading(false);
+      return;
+    }
+
+    logger.info("sop_status_change_success", { sopId: sop.id, from: fromStatus, to: newStatus });
+    setSop(data as SOP);
+    setActionLoading(false);
+  }
+
+  async function handleDeleteSOP() {
+    if (!sop) return;
+    setActionLoading(true);
+
+    const { error: deleteError } = await supabase
+      .from("sops")
+      .update({ deleted_at: new Date().toISOString() })
+      .eq("id", sop.id);
+
+    if (deleteError) {
+      logger.error("sop_delete_error", { message: deleteError.message });
+      setSaveError(deleteError.message);
+      setActionLoading(false);
+      return;
+    }
+
+    logger.info("sop_delete_success", { sopId: sop.id });
+    navigate("/sops", { replace: true });
+  }
+
   // ── Reorder Steps ────────────────────────────────────────────────────────────
 
   async function handleMoveStep(index: number, direction: "up" | "down") {
@@ -386,12 +437,76 @@ export default function SOPDetailPage() {
               </button>
             </>
           ) : (
-            <button type="button" onClick={startEditing} className={btnSecondary}>
-              Edit
-            </button>
+            <>
+              {sop.status === "draft" && (
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange("published")}
+                  disabled={actionLoading}
+                  className="rounded-sm bg-accent px-4 py-2 text-sm font-600 text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+                >
+                  Publish
+                </button>
+              )}
+              {(sop.status === "draft" || sop.status === "published") && (
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange("archived")}
+                  disabled={actionLoading}
+                  className={btnSecondary + " disabled:opacity-50"}
+                >
+                  Archive
+                </button>
+              )}
+              {sop.status === "archived" && (
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange("draft")}
+                  disabled={actionLoading}
+                  className={btnSecondary + " disabled:opacity-50"}
+                >
+                  Unarchive
+                </button>
+              )}
+              <button type="button" onClick={startEditing} className={btnSecondary}>
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                disabled={actionLoading}
+                className="rounded-sm px-4 py-2 text-sm font-500 text-warn transition-colors hover:bg-warn-light disabled:opacity-50"
+              >
+                Delete
+              </button>
+            </>
           )}
         </div>
       </div>
+
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <div className="mt-4 flex items-center justify-between rounded-sm bg-warn-light px-4 py-3">
+          <p className="text-sm font-500 text-warn">Are you sure? This cannot be undone.</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(false)}
+              className={btnSecondary + " !py-1.5 text-xs"}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleDeleteSOP}
+              disabled={actionLoading}
+              className="rounded-sm bg-warn px-3 py-1.5 text-xs font-600 text-white transition-colors hover:opacity-90 disabled:opacity-50"
+            >
+              {actionLoading ? "Deleting..." : "Yes, delete"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Save error */}
       {saveError && (
