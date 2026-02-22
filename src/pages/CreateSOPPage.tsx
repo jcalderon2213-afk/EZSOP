@@ -188,7 +188,7 @@ export default function CreateSOPPage() {
 
       logger.info("recommendation_start_success", { recId: rec.id, sopId: sop.id });
       showToast("SOP created from recommendation", "success");
-      navigate(`/sops/${sop.id}`, { replace: true });
+      navigate(`/sops/${sop.id}/build/context`, { replace: true });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("recommendation_start_error", { recId: rec.id, message });

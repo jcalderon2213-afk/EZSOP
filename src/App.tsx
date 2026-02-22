@@ -49,6 +49,14 @@ function App() {
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
             <Route path="sops" element={<SOPLibraryPage />} />
+            <Route path="sops/:id/build">
+              <Route index element={<Navigate to="context" replace />} />
+              <Route path="context" element={<ContextUploadPage />} />
+              <Route path="voice" element={<VoiceCapturePage />} />
+              <Route path="transcript" element={<TranscriptReviewPage />} />
+              <Route path="draft" element={<DraftEditorPage />} />
+              <Route path="compliance" element={<ComplianceAuditPage />} />
+            </Route>
             <Route path="sops/:id" element={<SOPDetailPage />} />
             <Route path="sops/create/custom" element={<CustomCreateSOPPage />} />
             <Route path="sops/create" element={<CreateSOPPage />}>
