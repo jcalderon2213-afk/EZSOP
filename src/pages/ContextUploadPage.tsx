@@ -2,39 +2,13 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
+import BuildStepper from "../components/BuildStepper";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface RefLink {
   url: string;
   label: string;
-}
-
-// ── Stepper ───────────────────────────────────────────────────────────────────
-
-const BUILD_STEPS = ["Context", "Voice", "Transcript", "Draft", "Compliance"];
-
-function BuildStepper({ current }: { current: number }) {
-  return (
-    <nav className="mb-8 flex items-center justify-center gap-2">
-      {BUILD_STEPS.map((label, i) => (
-        <div key={label} className="flex items-center gap-2">
-          {i > 0 && <span className="text-text-light">&rsaquo;</span>}
-          <span
-            className={`rounded-sm px-3 py-1.5 text-sm font-500 ${
-              i === current
-                ? "bg-primary text-white"
-                : i < current
-                  ? "bg-accent-light text-accent"
-                  : "border border-card-border bg-card text-text-muted"
-            }`}
-          >
-            {label}
-          </span>
-        </div>
-      ))}
-    </nav>
-  );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -160,7 +134,7 @@ export default function ContextUploadPage() {
       </p>
 
       <div className="mt-6 max-w-[700px]">
-        <BuildStepper current={0} />
+        <BuildStepper currentStep={0} />
 
         {/* ── Reference Links ──────────────────────────────────────────── */}
         <div className="rounded border border-card-border bg-card p-6 shadow">

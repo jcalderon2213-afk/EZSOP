@@ -242,3 +242,18 @@
 **Status:** Pending visual verification
 
 ---
+
+### Extract BuildStepper + Build VoiceCapturePage
+**Files created:**
+- src/components/BuildStepper.tsx — Shared 5-step stepper bar (Context > Voice > Transcript > Draft > Compliance), accepts currentStep and optional steps array, 3 visual states (current/completed/upcoming)
+- src/pages/VoiceCapturePage.tsx — Full rewrite: SOP title fetch, BuildStepper (step 2), large textarea for typing/dictating, Web Speech API (webkitSpeechRecognition) mic toggle with pulse animation and duration timer, speech-to-text appends to textarea, Clear button, localStorage save/restore keyed by SOP id, Continue/Skip/Back navigation
+
+**Files modified:**
+- src/pages/ContextUploadPage.tsx — Replaced inline BuildStepper with shared component import
+- src/index.css — Added pulse-record keyframe animation for recording indicator
+
+**Logger events:** voice_capture_start, voice_capture_stop, voice_capture_error, voice_capture_saved
+
+**Status:** Pending visual verification
+
+---
