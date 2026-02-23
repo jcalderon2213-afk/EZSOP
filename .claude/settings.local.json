@@ -9,7 +9,8 @@
       "Bash(cd /c/Users/JONLAPTOP/EZSOP && npx tsc --noEmit 2>&1)",
       "Bash(cd /c/Users/JONLAPTOP/EZSOP && npx vite build 2>&1)",
       "Bash(cd:*)",
-      "Bash(cd /c/Users/JONLAPTOP/EZSOP && npm run dev 2>&1)"
+      "Bash(cd /c/Users/JONLAPTOP/EZSOP && npm run dev 2>&1)",
+      "Bash(head:*)"
     ]
   }
 }

@@ -142,6 +142,70 @@ Break this process into clear, numbered steps. Return a JSON array of objects wi
         return jsonResponse({ success: true, data: { steps } });
       }
 
+      case "compliance-check": {
+        const { sop_title, steps: sopSteps, industry_type, state, governing_bodies } = payload ?? {};
+
+        if (!sopSteps || !Array.isArray(sopSteps) || sopSteps.length === 0) {
+          return jsonResponse(
+            { success: false, error: "Missing required field: steps (array of SOP steps)" },
+            400,
+          );
+        }
+
+        const stepsText = sopSteps
+          .map((s: { step_number: number; title: string; description: string }) =>
+            `Step ${s.step_number}: ${s.title}\n${s.description || "No description"}`)
+          .join("\n\n");
+
+        let contextInfo = "";
+        if (industry_type) contextInfo += `\nIndustry: ${industry_type}`;
+        if (state) contextInfo += `\nLocation: ${state}`;
+        if (Array.isArray(governing_bodies) && governing_bodies.length > 0) {
+          const gbList = governing_bodies
+            .map((gb: { name: string; level: string }) => `${gb.name} (${gb.level})`)
+            .join(", ");
+          contextInfo += `\nGoverning bodies: ${gbList}`;
+        }
+
+        const userPrompt = `Review the following SOP for regulatory compliance issues, safety gaps, and best-practice violations:
+
+SOP Title: ${sop_title || "Untitled SOP"}
+${contextInfo ? `\nBusiness context:${contextInfo}` : ""}
+
+SOP Steps:
+${stepsText}
+
+Identify compliance findings — gaps, risks, or areas that need improvement. For each finding, specify severity and which step it relates to (or null if it's a general issue). Return a JSON array of objects with these fields:
+- "finding_id": integer starting at 1
+- "severity": "high" | "medium" | "low"
+- "title": short description of the issue (1 sentence)
+- "description": detailed explanation of why this is a compliance concern (2-3 sentences)
+- "related_step": step number (integer) or null if general
+- "recommendation": what the user should do to address this (1-2 sentences)`;
+
+        const message = await client.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2048,
+          system: "You are a regulatory compliance auditor specializing in Standard Operating Procedures for care facilities, healthcare providers, and related industries. Review SOPs against industry regulations, safety standards, and best practices. Identify gaps, risks, and areas needing improvement. Be thorough but practical — focus on findings that matter. Return ONLY a valid JSON array. No markdown code fences, no commentary, no explanation — just the raw JSON array.",
+          messages: [{ role: "user", content: userPrompt }],
+        });
+
+        const text =
+          message.content[0].type === "text" ? message.content[0].text : "";
+
+        let findings;
+        try {
+          findings = JSON.parse(text);
+        } catch {
+          return jsonResponse(
+            { success: false, error: "Failed to parse AI response as JSON" },
+            500,
+          );
+        }
+
+        return jsonResponse({ success: true, data: { findings } });
+      }
+
       case "test": {
         const prompt = payload?.prompt || "Say hello";
 

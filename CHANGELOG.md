@@ -296,3 +296,45 @@
 **Status:** Pending visual verification
 
 ---
+
+### Phase 4 Step 11: Compliance Check AI Action + ComplianceAuditPage
+**Files modified:**
+- supabase/functions/ai-gateway/index.ts — Added "compliance-check" action: takes SOP title + steps + business context (industry, state, governing bodies), calls Claude to identify compliance gaps/risks as JSON array of findings
+- src/pages/ComplianceAuditPage.tsx — Full rewrite: fetches SOP + steps + org context, auto-runs compliance check via AI, finding cards with severity badges, summary bar, resolve/skip/update actions, Finalize SOP button
+
+**AI compliance-check action:**
+- Input: sop_title, steps (array), industry_type, state, governing_bodies
+- System prompt: Regulatory compliance auditor, thorough but practical
+- Model: claude-sonnet-4-20250514, max_tokens 2048
+- Output: { success: true, data: { findings: [{ finding_id, severity, title, description, related_step, recommendation }] } }
+
+**ComplianceAuditPage features:**
+- Auto-runs compliance check on mount (with hasCheckedRef guard for StrictMode)
+- Spinner loading state during check, error state with Retry button
+- Summary bar: findings count by severity + resolved/skipped counts
+- Finding cards: severity badge (high=red, medium=yellow, low=blue), title, description, related step, recommendation
+- Three action buttons per finding: "Compliant" (resolved, dimmed), "Update SOP" (navigates to draft), "Skip" (dimmed)
+- "Finalize SOP" button: publishes SOP (status → published), navigates to /sops/:id
+- "Back to Draft" link
+
+**Logger events:** compliance_check_start/success/error, compliance_finding_resolve, compliance_finding_skip, sop_finalize
+
+**Status:** Pending visual verification
+
+---
+
+### useSpeechRecognition Hook + CreateSOPModal Shell
+**Files created:**
+- src/hooks/useSpeechRecognition.ts — Reusable hook: extracts Web Speech API logic from VoiceCapturePage, returns isRecording/duration/start/stop/toggle/isSupported/formatDuration, accepts onTranscript callback
+- src/components/CreateSOPModal.tsx — 5-step modal wizard shell: dark backdrop with blur, centered card (700px max), sticky header with step label + gradient progress bar + clickable dot indicators + close button, scrollable body with placeholder step content, footer with Back/Continue/Finalize buttons, useReducer state management
+
+**Files modified:**
+- src/pages/SOPLibraryPage.tsx — Added temporary "Test Modal" button + CreateSOPModal render for visual testing (to be removed)
+
+**Modal step labels:** Build Mode, Regulatory Context, Capture, Review Draft, Compliance
+
+**Reducer state shape:** currentStep, buildMode, regulatorySources, transcript, guidedConversation, coveredTopics, generatedSteps, suggestedSteps, complianceScore, complianceFindings
+
+**Status:** Pending visual verification
+
+---
