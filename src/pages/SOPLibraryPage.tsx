@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
-import CreateSOPModal from "../components/CreateSOPModal";
+import { useCreateSOP } from "../contexts/CreateSOPContext";
 
 interface SOP {
   id: string;
@@ -27,10 +27,10 @@ function formatDate(iso: string): string {
 }
 
 export default function SOPLibraryPage() {
+  const { openCreateSOP } = useCreateSOP();
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     async function fetchSOPs() {
@@ -64,17 +64,11 @@ export default function SOPLibraryPage() {
         <h1 className="font-display text-2xl font-600">SOP Library</h1>
         <button
           type="button"
-          onClick={() => setModalOpen(true)}
-          className="rounded-sm border border-dashed border-text-light px-3 py-1.5 text-xs text-text-muted transition-colors hover:text-text"
-        >
-          Test Modal
-        </button>
-        <Link
-          to="/sops/create"
+          onClick={openCreateSOP}
           className="rounded-sm bg-primary px-4 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover"
         >
           + New SOP
-        </Link>
+        </button>
       </div>
 
       {/* Error */}
@@ -96,12 +90,13 @@ export default function SOPLibraryPage() {
           <p className="mt-2 text-sm text-text-muted">
             Create your first Standard Operating Procedure to get started.
           </p>
-          <Link
-            to="/sops/create"
+          <button
+            type="button"
+            onClick={openCreateSOP}
             className="mt-6 inline-block rounded-sm bg-primary px-5 py-2.5 text-sm font-600 text-white transition-colors hover:bg-primary-hover"
           >
             Create your first SOP
-          </Link>
+          </button>
         </div>
       )}
 
@@ -133,13 +128,6 @@ export default function SOPLibraryPage() {
         </div>
       )}
 
-      {/* Temporary test harness — remove once modal is wired to real flow */}
-      <CreateSOPModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        sopId="test-123"
-        sopTitle="Hiring Caregivers"
-      />
     </div>
   );
 }

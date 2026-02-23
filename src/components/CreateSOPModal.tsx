@@ -4,6 +4,7 @@ import useSpeechRecognition from "../hooks/useSpeechRecognition";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { supabase } from "../lib/supabase";
+import { fetchKnowledgeContext } from "../lib/knowledgeContext";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -253,6 +254,8 @@ export default function CreateSOPModal({
       const org = orgResult.data;
       const governingBodies = gbResult.data;
 
+      const knowledgeContext = await fetchKnowledgeContext(orgId);
+
       const { data: fnData, error: fnError } = await supabase.functions.invoke(
         "ai-gateway",
         {
@@ -268,6 +271,7 @@ export default function CreateSOPModal({
               industry_type: org.industry_type,
               state: org.state,
               governing_bodies: governingBodies,
+              knowledge_context: knowledgeContext,
             },
           },
         },
@@ -293,6 +297,10 @@ export default function CreateSOPModal({
     setGenerating(true);
 
     try {
+      const knowledgeContext = userProfile?.org_id
+        ? await fetchKnowledgeContext(userProfile.org_id)
+        : null;
+
       const { data: fnData, error: fnError } = await supabase.functions.invoke(
         "ai-gateway",
         {
@@ -303,6 +311,7 @@ export default function CreateSOPModal({
               context_links: [],
               regulation_text: "",
               sop_title: sopTitle,
+              knowledge_context: knowledgeContext,
             },
           },
         },

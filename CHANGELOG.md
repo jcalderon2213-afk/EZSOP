@@ -2,6 +2,19 @@
 
 ## 2025-02-23
 
+### Phase KB5: Wire Knowledge Context into SOP Actions
+**Files created:**
+- src/lib/knowledgeContext.ts — Shared helper `fetchKnowledgeContext(orgId)` that queries knowledge_base.summary for an org
+
+**Files modified:**
+- supabase/functions/ai-gateway/index.ts — Added optional `knowledge_context` payload field to recommend-sops, generate-sop-steps, and compliance-check actions. Injected into user prompts as additional business context when present.
+- src/pages/CreateSOPPage.tsx — Fetches knowledge_context before recommend-sops call
+- src/components/CreateSOPModal.tsx — Fetches knowledge_context before generate-sop-steps and compliance-check calls
+
+**Status:** TypeScript clean, Vite build clean
+
+---
+
 ### Phase KB4: Build Knowledge Base (AI Ingest + UI)
 **Files modified:**
 - supabase/functions/ai-gateway/index.ts — Added "ingest-knowledge" action: synthesizes interview profile + provided checklist items into a structured knowledge summary (1000-2000 words) with learned_topics tags. max_tokens: 4096.

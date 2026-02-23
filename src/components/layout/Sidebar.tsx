@@ -1,4 +1,12 @@
 import { NavLink, useLocation } from "react-router-dom";
+import { useCreateSOP } from "../../contexts/CreateSOPContext";
+
+const CREATE_SOP_ICON = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 8v8M8 12h8" />
+  </svg>
+);
 
 const navGroups = [
   {
@@ -20,16 +28,6 @@ const navGroups = [
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
             <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
-          </svg>
-        ),
-      },
-      {
-        label: "Create SOP",
-        to: "/sops/create",
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 8v8M8 12h8" />
           </svg>
         ),
       },
@@ -85,15 +83,12 @@ const navGroups = [
 ];
 
 function checkActive(to: string, pathname: string): boolean {
-  if (to === "/sops") {
-    // Active for /sops and /sops/:id, but NOT /sops/create
-    return pathname === "/sops" || (pathname.startsWith("/sops/") && !pathname.startsWith("/sops/create"));
-  }
   return pathname === to || pathname.startsWith(to + "/");
 }
 
 export default function Sidebar() {
   const { pathname } = useLocation();
+  const { openCreateSOP } = useCreateSOP();
 
   return (
     <aside className="fixed top-0 left-0 z-30 flex h-screen w-[260px] flex-col bg-sidebar-bg text-sidebar-text -translate-x-full lg:translate-x-0 transition-transform">
@@ -135,6 +130,17 @@ export default function Sidebar() {
             </ul>
           </div>
         ))}
+
+        {/* Create SOP button — opens modal instead of navigating */}
+        <div className="mx-2 my-2 h-px bg-white/10" />
+        <button
+          type="button"
+          onClick={openCreateSOP}
+          className="flex w-full items-center gap-3 rounded-sm px-3.5 py-3 text-sm font-500 transition-colors hover:bg-sidebar-hover text-primary"
+        >
+          {CREATE_SOP_ICON}
+          Create SOP
+        </button>
       </nav>
 
       {/* Footer */}

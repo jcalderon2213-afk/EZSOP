@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useToast } from "../contexts/ToastContext";
+import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
 
@@ -65,6 +66,8 @@ const PRIORITY_SECTIONS = [
 
 export default function KnowledgeChecklist({ orgId, profile, initialItems, onBack }: Props) {
   const { showToast } = useToast();
+  const { refreshKnowledgeBase } = useAuth();
+  const navigate = useNavigate();
 
   const [items, setItems] = useState<KnowledgeItem[]>(initialItems);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -639,12 +642,16 @@ export default function KnowledgeChecklist({ orgId, profile, initialItems, onBac
             >
               {building ? "Rebuilding..." : "Update Knowledge Base"}
             </button>
-            <Link
-              to="/sops/create"
+            <button
+              type="button"
+              onClick={async () => {
+                await refreshKnowledgeBase();
+                navigate("/sops");
+              }}
               className="rounded-xs bg-primary px-4 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover"
             >
               Create SOPs &rarr;
-            </Link>
+            </button>
           </div>
         </div>
       ) : allRequiredDone ? (

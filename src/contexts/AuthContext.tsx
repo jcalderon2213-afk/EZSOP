@@ -17,8 +17,10 @@ interface AuthContextValue {
   session: Session | null;
   userProfile: UserProfile | null;
   loading: boolean;
+  hasKnowledgeBase: boolean;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  refreshKnowledgeBase: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -57,10 +59,21 @@ async function fetchOrCreateProfile(userId: string, email: string): Promise<User
   throw error;
 }
 
+async function checkKnowledgeBase(orgId: string): Promise<boolean> {
+  const { data } = await supabase
+    .from("knowledge_base")
+    .select("id")
+    .eq("org_id", orgId)
+    .eq("status", "complete")
+    .maybeSingle();
+  return !!data;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasKnowledgeBase, setHasKnowledgeBase] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -84,6 +97,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!ignore) {
           setUserProfile(profile);
           logger.setContext({ userId: profile.id, orgId: profile.org_id });
+
+          if (profile.org_id) {
+            const hasKb = await checkKnowledgeBase(profile.org_id);
+            if (!ignore) setHasKnowledgeBase(hasKb);
+          }
         }
       } catch {
         // Profile fetch/create failed — still set session so user isn't stuck
@@ -146,8 +164,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function handleRefreshKnowledgeBase() {
+    if (!userProfile?.org_id) return;
+    const hasKb = await checkKnowledgeBase(userProfile.org_id);
+    setHasKnowledgeBase(hasKb);
+  }
+
   return (
-    <AuthContext.Provider value={{ session, userProfile, loading, signOut: handleSignOut, refreshProfile: handleRefreshProfile }}>
+    <AuthContext.Provider value={{ session, userProfile, loading, hasKnowledgeBase, signOut: handleSignOut, refreshProfile: handleRefreshProfile, refreshKnowledgeBase: handleRefreshKnowledgeBase }}>
       {children}
     </AuthContext.Provider>
   );

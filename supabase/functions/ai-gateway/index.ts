@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
 
     switch (action) {
       case "recommend-sops": {
-        const { industry_type, state, county, governing_bodies } = payload ?? {};
+        const { industry_type, state, county, governing_bodies, knowledge_context } = payload ?? {};
 
         if (!industry_type || !state) {
           return jsonResponse(
@@ -49,11 +49,15 @@ Deno.serve(async (req) => {
         const locationParts = [state];
         if (county) locationParts.push(`${county} County`);
 
+        const knowledgeSection = knowledge_context
+          ? `\n\nBusiness Knowledge Base (use this to personalize recommendations):\n${knowledge_context}`
+          : "";
+
         const userPrompt = `Generate 8-12 recommended Standard Operating Procedures for the following business:
 
 Industry: ${industry_type}
 Location: ${locationParts.join(", ")}
-Governing bodies: ${gbList}
+Governing bodies: ${gbList}${knowledgeSection}
 
 Return a JSON array of objects with these fields:
 - "title": short SOP title
@@ -85,7 +89,7 @@ Return a JSON array of objects with these fields:
       }
 
       case "generate-sop-steps": {
-        const { transcript, context_links, regulation_text, sop_title } = payload ?? {};
+        const { transcript, context_links, regulation_text, sop_title, knowledge_context } = payload ?? {};
 
         if (!transcript) {
           return jsonResponse(
@@ -107,12 +111,16 @@ Return a JSON array of objects with these fields:
           regulationSection = `\n\nRelevant regulation text:\n${regulation_text}`;
         }
 
+        const knowledgeSectionSop = knowledge_context
+          ? `\n\nBusiness knowledge base:\n${knowledge_context}`
+          : "";
+
         const userPrompt = `Generate structured SOP steps for the following process:
 
 SOP Title: ${sop_title || "Untitled SOP"}
 
 Process description (from user):
-${transcript}${contextSection}${regulationSection}
+${transcript}${contextSection}${regulationSection}${knowledgeSectionSop}
 
 Break this process into clear, numbered steps. Return a JSON array of objects with these fields:
 - "step_number": integer starting at 1
@@ -143,7 +151,7 @@ Break this process into clear, numbered steps. Return a JSON array of objects wi
       }
 
       case "compliance-check": {
-        const { sop_title, steps: sopSteps, industry_type, state, governing_bodies } = payload ?? {};
+        const { sop_title, steps: sopSteps, industry_type, state, governing_bodies, knowledge_context } = payload ?? {};
 
         if (!sopSteps || !Array.isArray(sopSteps) || sopSteps.length === 0) {
           return jsonResponse(
@@ -167,11 +175,14 @@ Break this process into clear, numbered steps. Return a JSON array of objects wi
           contextInfo += `\nGoverning bodies: ${gbList}`;
         }
 
+        const knowledgeSectionCC = knowledge_context
+          ? `\nBusiness Knowledge Base:\n${knowledge_context}\n`
+          : "";
+
         const userPrompt = `Review the following SOP for regulatory compliance issues, safety gaps, and best-practice violations:
 
 SOP Title: ${sop_title || "Untitled SOP"}
-${contextInfo ? `\nBusiness context:${contextInfo}` : ""}
-
+${contextInfo ? `\nBusiness context:${contextInfo}` : ""}${knowledgeSectionCC}
 SOP Steps:
 ${stepsText}
 

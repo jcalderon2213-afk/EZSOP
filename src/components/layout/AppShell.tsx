@@ -1,9 +1,12 @@
 import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
+import { CreateSOPProvider, useCreateSOP } from "../../contexts/CreateSOPContext";
+import CreateSOPModal from "../CreateSOPModal";
 
-export default function AppShell() {
+function AppShellContent() {
   const { pathname } = useLocation();
+  const { isOpen, closeCreateSOP } = useCreateSOP();
 
   return (
     <div className="min-h-screen">
@@ -18,6 +21,21 @@ export default function AppShell() {
           </div>
         </div>
       </main>
+
+      <CreateSOPModal
+        isOpen={isOpen}
+        onClose={closeCreateSOP}
+        sopId="pending"
+        sopTitle="New SOP"
+      />
     </div>
+  );
+}
+
+export default function AppShell() {
+  return (
+    <CreateSOPProvider>
+      <AppShellContent />
+    </CreateSOPProvider>
   );
 }
