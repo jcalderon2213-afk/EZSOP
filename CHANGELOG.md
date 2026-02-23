@@ -355,3 +355,26 @@
 **Status:** Pending visual verification
 
 ---
+
+### Phase B1: Step 3 Talk It Out Capture Mode
+**Files modified:**
+- src/components/CreateSOPModal.tsx — Built Step 3 content for Talk It Out mode using useSpeechRecognition hook
+
+**New reducer actions:**
+- SET_TRANSCRIPT — sets transcript directly (textarea onChange)
+- APPEND_TRANSCRIPT — appends chunk with space separator logic (speech recognition callback)
+
+**Talk It Out UI:**
+- Purple pill badge: "Talk It Out Mode" (bg-purple-light text-purple)
+- 72px circular mic button: warn border/bg, microphone emoji, pulse-record animation when recording
+- Label: "Start Recording" / "Stop Recording (MM:SS)" using formatDuration from hook
+- Fallback text when speech not supported
+- Textarea: min-h-[120px], resizable, bound to state.transcript via SET_TRANSCRIPT
+- Clear button: visible when transcript non-empty, resets to ""
+- Prompt hints panel: bg-primary-light, 3px left border primary, 4 italic starter phrases
+
+**Step 3 guided mode:** Shows "Guided mode coming soon." placeholder
+
+**Status:** Pending visual verification
+
+---

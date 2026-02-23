@@ -1,4 +1,5 @@
-import { useReducer } from "react";
+import { useCallback, useReducer } from "react";
+import useSpeechRecognition from "../hooks/useSpeechRecognition";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,8 @@ interface ModalState {
 type ModalAction =
   | { type: "SET_STEP"; step: number }
   | { type: "SET_BUILD_MODE"; mode: ModalState["buildMode"] }
+  | { type: "SET_TRANSCRIPT"; transcript: string }
+  | { type: "APPEND_TRANSCRIPT"; chunk: string }
   | { type: "SET_FIELD"; field: keyof ModalState; value: unknown }
   | { type: "RESET" };
 
@@ -69,6 +72,13 @@ function reducer(state: ModalState, action: ModalAction): ModalState {
       return { ...state, currentStep: action.step };
     case "SET_BUILD_MODE":
       return { ...state, buildMode: action.mode };
+    case "SET_TRANSCRIPT":
+      return { ...state, transcript: action.transcript };
+    case "APPEND_TRANSCRIPT": {
+      const prev = state.transcript;
+      const separator = prev && !prev.endsWith(" ") && !prev.endsWith("\n") ? " " : "";
+      return { ...state, transcript: prev + separator + action.chunk };
+    }
     case "SET_FIELD":
       return { ...state, [action.field]: action.value };
     case "RESET":
@@ -88,6 +98,13 @@ export default function CreateSOPModal({
   const [state, dispatch] = useReducer(reducer, initialState);
   const { currentStep } = state;
   const stepIndex = currentStep - 1;
+
+  const handleTranscriptChunk = useCallback((chunk: string) => {
+    dispatch({ type: "APPEND_TRANSCRIPT", chunk });
+  }, []);
+
+  const { isRecording, duration, toggleRecording, isSupported, formatDuration } =
+    useSpeechRecognition(handleTranscriptChunk);
 
   if (!isOpen) return null;
 
@@ -285,8 +302,93 @@ export default function CreateSOPModal({
                 </div>
               </button>
             </div>
+          ) : currentStep === 3 && state.buildMode === "talk" ? (
+            /* ── Step 3: Talk It Out ─────────────────────────────── */
+            <div className="mt-6 space-y-6">
+              {/* Mode badge */}
+              <div className="flex justify-center">
+                <span className="rounded-full bg-purple-light px-3 py-1 text-[11px] font-600 uppercase tracking-wide text-purple">
+                  Talk It Out Mode
+                </span>
+              </div>
+
+              {/* Mic record area */}
+              <div className="flex flex-col items-center gap-3">
+                {isSupported ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={toggleRecording}
+                      className={`flex h-[72px] w-[72px] items-center justify-center rounded-full border-2 text-2xl transition-colors ${
+                        isRecording
+                          ? "border-warn bg-warn pulse-record"
+                          : "border-warn bg-warn-light hover:bg-warn/10"
+                      }`}
+                      aria-label={isRecording ? "Stop recording" : "Start recording"}
+                    >
+                      🎙️
+                    </button>
+                    <p className="text-sm font-500 text-text-muted">
+                      {isRecording
+                        ? `Stop Recording (${formatDuration(duration)})`
+                        : "Start Recording"}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-text-muted">
+                    Voice input not supported in this browser. Type your process below.
+                  </p>
+                )}
+              </div>
+
+              {/* Textarea + Clear */}
+              <div>
+                <textarea
+                  value={state.transcript}
+                  onChange={(e) =>
+                    dispatch({ type: "SET_TRANSCRIPT", transcript: e.target.value })
+                  }
+                  rows={6}
+                  className="w-full min-h-[120px] resize-y rounded-sm border border-card-border bg-card px-3 py-2.5 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  placeholder="Type your process here… or use the record button above."
+                />
+                {state.transcript && (
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        dispatch({ type: "SET_TRANSCRIPT", transcript: "" })
+                      }
+                      className="text-sm text-text-muted transition-colors hover:text-warn"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Prompt hints */}
+              <div className="rounded-sm border-l-[3px] border-primary bg-primary-light px-4 py-3">
+                <p className="text-xs font-600 uppercase tracking-wide text-primary">
+                  Try starting with…
+                </p>
+                <ul className="mt-2 space-y-1 text-sm italic text-text-muted">
+                  <li>"First thing I do is…"</li>
+                  <li>"If they don't have their documents…"</li>
+                  <li>"Before they can start working I need to…"</li>
+                  <li>"The background check process is…"</li>
+                </ul>
+              </div>
+            </div>
+          ) : currentStep === 3 && state.buildMode === "guided" ? (
+            /* ── Step 3: Guided placeholder ──────────────────────── */
+            <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
+              <p className="text-sm text-text-light">
+                Guided mode coming soon.
+              </p>
+            </div>
           ) : (
-            /* Placeholder for steps 2–5 */
+            /* Placeholder for steps 2, 4, 5 */
             <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
               <p className="text-sm text-text-light">
                 Step {currentStep} content will go here.
