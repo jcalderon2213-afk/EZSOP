@@ -206,6 +206,106 @@ Identify compliance findings — gaps, risks, or areas that need improvement. Fo
         return jsonResponse({ success: true, data: { findings } });
       }
 
+      case "knowledge-interview": {
+        const { industry_type, state, county, messages: chatHistory } = payload ?? {};
+
+        if (!industry_type || !state) {
+          return jsonResponse(
+            { success: false, error: "Missing required fields: industry_type, state" },
+            400,
+          );
+        }
+
+        // Build the opening user message with business context
+        const locationParts = [state];
+        if (county) locationParts.push(`${county} County`);
+
+        const openingMessage = `I run a ${industry_type} in ${locationParts.join(", ")}. Please start the interview.`;
+
+        // Construct the full messages array: opening context + conversation history
+        const apiMessages: Array<{ role: "user" | "assistant"; content: string }> = [
+          { role: "user", content: openingMessage },
+        ];
+
+        if (Array.isArray(chatHistory) && chatHistory.length > 0) {
+          for (const msg of chatHistory) {
+            apiMessages.push({
+              role: msg.role as "user" | "assistant",
+              content: msg.content,
+            });
+          }
+        }
+
+        const message = await client.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 3072,
+          system: `You are an expert business compliance consultant conducting an intake interview. Your goal is to learn enough about the user's business to later generate a personalized checklist of compliance documents, licenses, certifications, and regulatory resources they need to collect.
+
+Ask 5–10 questions, ONE at a time. Adapt your questions to the specific industry type and to previous answers. Be conversational, warm, and encouraging — this replaces a boring onboarding form. Do NOT ask for the business name (we already have it). Do NOT ask about operating hours.
+
+Focus your questions on topics that help generate a compliance document checklist:
+- Services offered and client/customer types served
+- Staff size and key roles
+- Known regulatory or licensing bodies they report to
+- Certifications or licenses already held
+- Compliance challenges or pain points they experience
+- Years in operation
+- Special operational details (capacity, unique features, accommodations)
+
+Skip topics the user has already answered naturally. If an answer is vague, ask one brief follow-up before moving on. Never ask more than 10 questions total.
+
+RESPONSE FORMAT — return ONLY a valid JSON object. No markdown fences, no commentary outside the JSON.
+
+While interviewing:
+{
+  "message": "Your conversational question text",
+  "question_number": <int>,
+  "total_expected": <int>,
+  "topic": "<category_tag>",
+  "done": false
+}
+
+When the interview is complete:
+{
+  "message": "A friendly wrap-up summarizing what you learned",
+  "question_number": <int>,
+  "total_expected": <int>,
+  "topic": "complete",
+  "done": true,
+  "profile": {
+    "industry_subtype": "<string or null>",
+    "services": ["<string>"],
+    "client_types": ["<string>"],
+    "staff_count_range": "1-5" | "6-15" | "16-50" | "50+",
+    "licensing_bodies": ["<string>"],
+    "certifications_held": ["<string>"],
+    "years_in_operation": <number or null>,
+    "special_considerations": ["<string>"],
+    "has_existing_sops": <boolean>,
+    "pain_points": ["<string>"]
+  }
+}
+
+Adjust total_expected as the conversation progresses. The profile must synthesize ALL information gathered throughout the entire interview.`,
+          messages: apiMessages,
+        });
+
+        const text =
+          message.content[0].type === "text" ? message.content[0].text : "";
+
+        let interview;
+        try {
+          interview = JSON.parse(text);
+        } catch {
+          return jsonResponse(
+            { success: false, error: "Failed to parse AI response as JSON" },
+            500,
+          );
+        }
+
+        return jsonResponse({ success: true, data: interview });
+      }
+
       case "test": {
         const prompt = payload?.prompt || "Say hello";
 
