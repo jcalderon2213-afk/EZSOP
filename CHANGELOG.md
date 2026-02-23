@@ -379,6 +379,39 @@
 
 ---
 
+### Phase KB1: Knowledge Builder Interview Page
+**Files created:**
+- src/pages/KnowledgeBuilderPage.tsx — Chat-style AI interview page: loads/creates knowledge_interviews row, auto-fires first AI call, chat bubbles (AI left/user right), progress bar, typing indicator, error retry, complete summary view with profile card
+
+**Files modified:**
+- src/App.tsx — Added /knowledge route (protected, inside AppShell), imported KnowledgeBuilderPage
+- src/components/layout/Sidebar.tsx — Added "Knowledge Base" nav item (book-open SVG icon) after "Business Profile" in first nav group
+- src/index.css — Added typing-dot keyframe animation (1.4s staggered opacity pulse) for chat thinking indicator
+
+**Page states:**
+- Loading: "Loading..." text (matches BusinessProfilePage pattern)
+- In-progress: Full chat UI with message bubbles, progress bar (gradient, Question X of Y), textarea + Send button (Enter sends, Shift+Enter newline), typing dots while AI responds, inline error retry
+- Complete: Success banner, profile summary card (dl layout: specialization, services, client types, staff size, years, licensing bodies, certifications, special considerations, existing SOPs, pain points), Start Over button, disabled "Continue to Document Checklist" placeholder
+
+**Message flow:**
+1. Mount → fetch knowledge_interviews row for org_id
+2. No row → create (status: in_progress, messages: []) → fire first AI call
+3. Row with in_progress + empty messages → fire first AI call
+4. Row with in_progress + messages → restore chat, ready for user input
+5. Row with complete → show summary view
+6. Each send: append user message → call ai-gateway knowledge-interview → append AI response → save to DB
+7. AI returns done=true → save profile to answers column, set status complete
+
+**Persistence:** Messages saved to knowledge_interviews.messages (jsonb) after each exchange. Profile saved to knowledge_interviews.answers on completion. Start Over resets row (update, not delete) and re-fires first AI call.
+
+**Org context:** Fetched once on mount (industry_type, state, county from orgs table), cached in ref.
+
+**Logger events:** knowledge_load_start, knowledge_load_complete, knowledge_interview_created, knowledge_ai_error, knowledge_interview_complete, knowledge_interview_restart, knowledge_load_error
+
+**Status:** Pending visual verification
+
+---
+
 ### Phase D1+D2: Step 5 Compliance Audit + Finalize
 **Files modified:**
 - src/components/CreateSOPModal.tsx — Built Step 5 content: auto-runs compliance-check AI action on arrival, SVG compliance score ring (68px, stroke-dasharray arc), findings cards with severity badges (HIGH/MEDIUM/LOW), three action buttons per finding (Compliant/Update SOP/Skip), confirmation checkbox row, Finalize button creates SOP + steps in Supabase and navigates to detail page

@@ -18,6 +18,7 @@ import BusinessProfilePage from "./pages/BusinessProfilePage";
 import PracticeModePage from "./pages/PracticeModePage";
 import PracticeChatPage from "./pages/PracticeChatPage";
 import PracticeDebriefPage from "./pages/PracticeDebriefPage";
+import KnowledgeBuilderPage from "./pages/KnowledgeBuilderPage";
 import ComplianceLogPage from "./pages/ComplianceLogPage";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
@@ -67,6 +68,7 @@ function App() {
               <Route path="compliance" element={<ComplianceAuditPage />} />
             </Route>
             <Route path="profile" element={<BusinessProfilePage />} />
+            <Route path="knowledge" element={<KnowledgeBuilderPage />} />
             <Route path="practice" element={<PracticeModePage />} />
             <Route path="practice/:scenarioId" element={<PracticeChatPage />} />
             <Route path="practice/:scenarioId/debrief" element={<PracticeDebriefPage />} />

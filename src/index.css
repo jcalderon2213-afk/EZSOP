@@ -96,3 +96,12 @@ body {
 .pulse-record {
   animation: pulse-record 1s ease-in-out infinite;
 }
+
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; }
+  30% { opacity: 1; }
+}
+
+.typing-dot {
+  animation: typing-dot 1.4s infinite;
+}
