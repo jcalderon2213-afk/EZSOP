@@ -379,6 +379,47 @@
 
 ---
 
+### Phase D1+D2: Step 5 Compliance Audit + Finalize
+**Files modified:**
+- src/components/CreateSOPModal.tsx — Built Step 5 content: auto-runs compliance-check AI action on arrival, SVG compliance score ring (68px, stroke-dasharray arc), findings cards with severity badges (HIGH/MEDIUM/LOW), three action buttons per finding (Compliant/Update SOP/Skip), confirmation checkbox row, Finalize button creates SOP + steps in Supabase and navigates to detail page
+
+**New types:**
+- ComplianceFinding — { finding_id, severity, title, description, related_step, recommendation }
+- ModalState.complianceFindings typed as ComplianceFinding[] (was unknown[])
+
+**New reducer actions:**
+- SET_COMPLIANCE_SCORE — sets computed compliance score
+- SET_COMPLIANCE_FINDINGS — sets findings array from AI response
+
+**New local state:**
+- complianceLoading, complianceError — AI call loading/error
+- resolvedFindings (Set<number>) — tracks findings marked Compliant or Skipped
+- confirmed — checkbox state for compliance confirmation
+- finalizing — loading state for Finalize button
+- hasCheckedComplianceRef — prevents StrictMode double-fire
+
+**Score calculation:**
+- computeScore(): starts at 100, subtracts 15/HIGH, 8/MEDIUM, 3/LOW, floor at 0
+
+**Compliance check flow:**
+- useEffect triggers on currentStep === 5 with ref guard
+- Fetches org data (industry_type, state) + governing_bodies from Supabase
+- Calls ai-gateway compliance-check action with SOP title, steps, and org context
+- Dispatches findings + computed score to reducer
+
+**Finalize flow:**
+- Disabled until confirmation checkbox is checked
+- Creates SOP row in sops table (status: published, title, org_id, created_by)
+- Inserts all generatedSteps into sop_steps table with new sop_id
+- Shows success toast, closes modal, navigates to /sops/:newSopId
+- Error handling: toast on failure, loading state on button
+
+**New imports:** useNavigate (react-router-dom), useAuth (AuthContext), useToast (ToastContext)
+
+**Status:** Pending visual verification
+
+---
+
 ### Phase B2: Step 4 Review Draft with AI Step Generation
 **Files modified:**
 - src/components/CreateSOPModal.tsx — Built Step 4 content: auto-generates SOP steps via AI on arrival, editable step cards, add/delete/reorder

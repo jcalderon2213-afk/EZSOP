@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import useSpeechRecognition from "../hooks/useSpeechRecognition";
+import { useAuth } from "../contexts/AuthContext";
+import { useToast } from "../contexts/ToastContext";
 import { supabase } from "../lib/supabase";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -17,6 +20,15 @@ interface GeneratedStep {
   description: string;
 }
 
+interface ComplianceFinding {
+  finding_id: number;
+  severity: "high" | "medium" | "low";
+  title: string;
+  description: string;
+  related_step: number | null;
+  recommendation: string;
+}
+
 interface ModalState {
   currentStep: number;
   buildMode: "guided" | "talk" | null;
@@ -27,7 +39,7 @@ interface ModalState {
   generatedSteps: GeneratedStep[];
   suggestedSteps: unknown[];
   complianceScore: number | null;
-  complianceFindings: unknown[];
+  complianceFindings: ComplianceFinding[];
 }
 
 type ModalAction =
@@ -40,6 +52,8 @@ type ModalAction =
   | { type: "DELETE_STEP"; index: number }
   | { type: "REORDER_STEP"; index: number; direction: "up" | "down" }
   | { type: "ADD_STEP"; title: string; description: string }
+  | { type: "SET_COMPLIANCE_SCORE"; score: number }
+  | { type: "SET_COMPLIANCE_FINDINGS"; findings: ComplianceFinding[] }
   | { type: "SET_FIELD"; field: keyof ModalState; value: unknown }
   | { type: "RESET" };
 
@@ -125,6 +139,10 @@ function reducer(state: ModalState, action: ModalAction): ModalState {
         ],
       };
     }
+    case "SET_COMPLIANCE_SCORE":
+      return { ...state, complianceScore: action.score };
+    case "SET_COMPLIANCE_FINDINGS":
+      return { ...state, complianceFindings: action.findings };
     case "SET_FIELD":
       return { ...state, [action.field]: action.value };
     case "RESET":
@@ -136,11 +154,25 @@ function reducer(state: ModalState, action: ModalAction): ModalState {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+function computeScore(findings: ComplianceFinding[]): number {
+  let score = 100;
+  for (const f of findings) {
+    if (f.severity === "high") score -= 15;
+    else if (f.severity === "medium") score -= 8;
+    else if (f.severity === "low") score -= 3;
+  }
+  return Math.max(0, score);
+}
+
 export default function CreateSOPModal({
   isOpen,
   onClose,
   sopTitle,
 }: CreateSOPModalProps) {
+  const navigate = useNavigate();
+  const { userProfile } = useAuth();
+  const { showToast } = useToast();
+
   const [state, dispatch] = useReducer(reducer, initialState);
   const { currentStep } = state;
   const stepIndex = currentStep - 1;
@@ -163,6 +195,14 @@ export default function CreateSOPModal({
   const [addDescription, setAddDescription] = useState("");
   const hasGeneratedRef = useRef(false);
 
+  // ── Step 5: Compliance state ───────────────────────────────────────────
+  const [complianceLoading, setComplianceLoading] = useState(false);
+  const [complianceError, setComplianceError] = useState("");
+  const [resolvedFindings, setResolvedFindings] = useState<Set<number>>(new Set());
+  const [confirmed, setConfirmed] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+  const hasCheckedComplianceRef = useRef(false);
+
   // Auto-generate when entering Step 4
   useEffect(() => {
     if (
@@ -176,6 +216,77 @@ export default function CreateSOPModal({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep]);
+
+  // Auto-run compliance check when entering Step 5
+  useEffect(() => {
+    if (currentStep !== 5 || hasCheckedComplianceRef.current) return;
+    hasCheckedComplianceRef.current = true;
+    runComplianceCheck();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep]);
+
+  async function runComplianceCheck() {
+    setComplianceError("");
+    setComplianceLoading(true);
+
+    try {
+      // Fetch org context in parallel
+      const orgId = userProfile?.org_id;
+      if (!orgId) throw new Error("No organization found");
+
+      const [orgResult, gbResult] = await Promise.all([
+        supabase
+          .from("orgs")
+          .select("industry_type, state")
+          .eq("id", orgId)
+          .single(),
+        supabase
+          .from("governing_bodies")
+          .select("name, level")
+          .eq("org_id", orgId)
+          .is("deleted_at", null),
+      ]);
+
+      if (orgResult.error) throw orgResult.error;
+      if (gbResult.error) throw gbResult.error;
+
+      const org = orgResult.data;
+      const governingBodies = gbResult.data;
+
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        "ai-gateway",
+        {
+          body: {
+            action: "compliance-check",
+            payload: {
+              sop_title: sopTitle,
+              steps: state.generatedSteps.map((s) => ({
+                step_number: s.step_number,
+                title: s.title,
+                description: s.description,
+              })),
+              industry_type: org.industry_type,
+              state: org.state,
+              governing_bodies: governingBodies,
+            },
+          },
+        },
+      );
+
+      if (fnError) throw fnError;
+      if (!fnData?.success)
+        throw new Error(fnData?.error ?? "Unknown error from AI gateway");
+
+      const findings = fnData.data.findings as ComplianceFinding[];
+      dispatch({ type: "SET_COMPLIANCE_FINDINGS", findings });
+      dispatch({ type: "SET_COMPLIANCE_SCORE", score: computeScore(findings) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setComplianceError(message);
+    } finally {
+      setComplianceLoading(false);
+    }
+  }
 
   async function handleGenerate() {
     setGenError("");
@@ -231,9 +342,60 @@ export default function CreateSOPModal({
     }
   }
 
-  function handleFinalize() {
-    // Placeholder — will wire up later
-    onClose();
+  async function handleFinalize() {
+    if (!userProfile) return;
+    setFinalizing(true);
+
+    try {
+      // 1. Create SOP row
+      const { data: sop, error: sopError } = await supabase
+        .from("sops")
+        .insert({
+          title: sopTitle,
+          status: "published",
+          org_id: userProfile.org_id,
+          created_by: userProfile.id,
+        })
+        .select()
+        .single();
+
+      if (sopError) throw sopError;
+
+      // 2. Insert all steps
+      const stepRows = state.generatedSteps.map((s) => ({
+        sop_id: sop.id,
+        step_number: s.step_number,
+        title: s.title,
+        description: s.description,
+      }));
+
+      if (stepRows.length > 0) {
+        const { error: stepsError } = await supabase
+          .from("sop_steps")
+          .insert(stepRows);
+
+        if (stepsError) throw stepsError;
+      }
+
+      // 3. Success
+      showToast("SOP finalized!", "success");
+      onClose();
+      navigate(`/sops/${sop.id}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast(message, "error");
+    } finally {
+      setFinalizing(false);
+    }
+  }
+
+  function toggleFinding(findingId: number) {
+    setResolvedFindings((prev) => {
+      const next = new Set(prev);
+      if (next.has(findingId)) next.delete(findingId);
+      else next.add(findingId);
+      return next;
+    });
   }
 
   const progressPercent = (currentStep / TOTAL_STEPS) * 100;
@@ -704,8 +866,193 @@ export default function CreateSOPModal({
                 </div>
               )}
             </div>
+          ) : currentStep === 5 ? (
+            /* ── Step 5: Compliance Audit + Finalize ──────────────── */
+            <div className="mt-6">
+              {complianceLoading ? (
+                /* Loading spinner */
+                <div className="py-10 text-center">
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-card-border border-t-primary" />
+                  <p className="mt-4 text-sm font-500 text-text">
+                    Running compliance audit...
+                  </p>
+                  <p className="mt-1 text-xs text-text-muted">
+                    This may take a few seconds.
+                  </p>
+                </div>
+              ) : complianceError ? (
+                /* Error state */
+                <div className="rounded-sm bg-warn-light px-4 py-3 text-sm text-warn">
+                  <p>{complianceError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      hasCheckedComplianceRef.current = false;
+                      runComplianceCheck();
+                    }}
+                    className="mt-2 text-sm font-500 text-primary hover:text-primary-hover"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                /* Results */
+                <div className="space-y-6">
+                  {/* ── Score Ring ─────────────────────────────────── */}
+                  {state.complianceScore !== null && (
+                    <div className="flex items-center gap-5">
+                      <svg width="68" height="68" viewBox="0 0 68 68" className="shrink-0">
+                        {/* Background track */}
+                        <circle
+                          cx="34"
+                          cy="34"
+                          r="31"
+                          fill="none"
+                          stroke="var(--color-card-border)"
+                          strokeWidth="6"
+                        />
+                        {/* Filled arc */}
+                        <circle
+                          cx="34"
+                          cy="34"
+                          r="31"
+                          fill="none"
+                          stroke="var(--color-primary)"
+                          strokeWidth="6"
+                          strokeLinecap="round"
+                          strokeDasharray={`${2 * Math.PI * 31}`}
+                          strokeDashoffset={`${2 * Math.PI * 31 * (1 - state.complianceScore / 100)}`}
+                          transform="rotate(-90 34 34)"
+                        />
+                        {/* Score text */}
+                        <text
+                          x="34"
+                          y="34"
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          className="font-display font-700"
+                          fill="var(--color-text)"
+                          fontSize="18"
+                        >
+                          {state.complianceScore}
+                        </text>
+                      </svg>
+                      <div>
+                        <p className="text-sm font-600 text-text">
+                          Compliance Score: {state.complianceScore} / 100
+                        </p>
+                        <p className="mt-0.5 text-sm text-text-muted">
+                          {state.complianceScore >= 90
+                            ? "Looking good!"
+                            : state.complianceScore >= 70
+                              ? `Needs attention — ${state.complianceFindings.length} finding${state.complianceFindings.length === 1 ? "" : "s"}`
+                              : `Needs revision — ${state.complianceFindings.length} finding${state.complianceFindings.length === 1 ? "" : "s"}`}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Findings cards ────────────────────────────── */}
+                  {state.complianceFindings.length > 0 && (
+                    <div className="space-y-3">
+                      {state.complianceFindings.map((f) => {
+                        const isResolved = resolvedFindings.has(f.finding_id);
+                        return (
+                          <div
+                            key={f.finding_id}
+                            className={`rounded border border-card-border bg-card p-4 shadow-sm transition-opacity ${
+                              isResolved ? "opacity-50" : ""
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              {/* Severity badge */}
+                              <span
+                                className={`mt-0.5 shrink-0 rounded-xs px-2 py-0.5 text-[11px] font-600 uppercase ${
+                                  f.severity === "high"
+                                    ? "bg-warn-light text-warn"
+                                    : f.severity === "medium"
+                                      ? "bg-orange-100 text-orange-600"
+                                      : "bg-info-light text-info"
+                                }`}
+                              >
+                                {f.severity}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-500 text-text">{f.title}</p>
+                                <p className="mt-1 text-sm text-text-muted">{f.description}</p>
+                                {f.recommendation && (
+                                  <p className="mt-1 text-xs text-text-light italic">
+                                    {f.recommendation}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            {/* Actions */}
+                            {!isResolved && (
+                              <div className="mt-3 flex gap-2 pl-8">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleFinding(f.finding_id)}
+                                  className="rounded-sm bg-accent px-3 py-1.5 text-xs font-600 text-white transition-colors hover:bg-accent-hover"
+                                >
+                                  &#10003; Compliant
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => dispatch({ type: "SET_STEP", step: 4 })}
+                                  className="rounded-sm border border-card-border bg-card px-3 py-1.5 text-xs font-500 text-text-muted transition-colors hover:text-text"
+                                >
+                                  Update SOP
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleFinding(f.finding_id)}
+                                  className="rounded-sm px-3 py-1.5 text-xs font-500 text-text-light transition-colors hover:text-text-muted"
+                                >
+                                  Skip
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* ── Confirmation checkbox row ─────────────────── */}
+                  <button
+                    type="button"
+                    onClick={() => setConfirmed((c) => !c)}
+                    className="flex w-full items-center gap-3 rounded-sm bg-accent-light px-4 py-3 text-left transition-colors hover:bg-accent-light/80"
+                  >
+                    <span
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors ${
+                        confirmed
+                          ? "border-accent bg-accent text-white"
+                          : "border-card-border bg-card"
+                      }`}
+                    >
+                      {confirmed && (
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                          <path
+                            d="M2.5 6L5 8.5L9.5 3.5"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="text-sm text-text">
+                      I confirm this SOP reflects my current facility process and I have reviewed all compliance findings.
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
-            /* Placeholder for steps 2, 5 */
+            /* Placeholder for step 2 */
             <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
               <p className="text-sm text-text-light">
                 Step {currentStep} content will go here.
@@ -745,9 +1092,14 @@ export default function CreateSOPModal({
             <button
               type="button"
               onClick={handleFinalize}
-              className="rounded-sm bg-accent px-6 py-2 text-sm font-600 text-white transition-colors hover:bg-accent-hover"
+              disabled={!confirmed || finalizing}
+              className={`rounded-sm bg-accent px-6 py-2 text-sm font-600 text-white transition-colors ${
+                !confirmed || finalizing
+                  ? "cursor-not-allowed opacity-50"
+                  : "hover:bg-accent-hover"
+              }`}
             >
-              Finalize
+              {finalizing ? "Finalizing..." : "Finalize"}
             </button>
           )}
         </footer>
