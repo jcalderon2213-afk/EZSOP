@@ -1,5 +1,31 @@
 # EZSOP Changelog
 
+## 2025-02-23
+
+### Phase KB2: Document Checklist View
+**Files created:**
+- src/components/KnowledgeChecklist.tsx — Extracted checklist component with priority-grouped items, type-specific input UIs, progress bar, and Add Your Own form
+
+**Files modified:**
+- src/pages/KnowledgeBuilderPage.tsx — Imported KnowledgeChecklist, added view/checklistItems/generatingChecklist state, wired Continue button to generate checklist via AI or load from DB, added checklist render branch
+
+**Features:**
+- On "Continue to Document Checklist" click: checks DB for existing knowledge_items, generates via generate-knowledge-checklist AI action if none, persists to DB
+- On subsequent visits: auto-loads existing items and skips to checklist view
+- Items grouped under Required / Recommended / Optional section headers with counts
+- LINK items: "Use This" for suggested URLs, "Use Different Link" for custom URL input
+- PDF items: file input (saves filename to provided_file column)
+- DOCUMENT/OTHER items: textarea input (saves to provided_text column)
+- Every status change (provided, skipped) writes to knowledge_items immediately
+- Progress bar: counts items where status IN (provided, learned, skipped) vs total
+- "Add Your Own Item" form with title, description, type, priority fields
+- Provided items show checkmark + value with "Change" option; skipped items show "Reopen" option
+- Back arrow returns to profile summary view
+
+**Status:** TypeScript clean, Vite build clean ✓
+
+---
+
 ## 2025-02-21
 
 ### Step 1: Design System Setup

@@ -11,7 +11,10 @@
       "Bash(cd:*)",
       "Bash(cd /c/Users/JONLAPTOP/EZSOP && npm run dev 2>&1)",
       "Bash(head:*)",
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "Bash(git:*)",
+      "Bash(cd /c/Users/jcald/EZSOP && npx tsc --noEmit 2>&1)",
+      "Bash(cd /c/Users/jcald/EZSOP && npx vite build 2>&1)"
     ]
   }
 }

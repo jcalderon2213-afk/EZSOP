@@ -3,25 +3,14 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
+import KnowledgeChecklist from "../components/KnowledgeChecklist";
+import type { BusinessProfile, KnowledgeItem } from "../components/KnowledgeChecklist";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ChatMessage {
   role: "assistant" | "user";
   content: string;
-}
-
-interface BusinessProfile {
-  industry_subtype: string | null;
-  services: string[];
-  client_types: string[];
-  staff_count_range: string;
-  licensing_bodies: string[];
-  certifications_held: string[];
-  years_in_operation: number | null;
-  special_considerations: string[];
-  has_existing_sops: boolean;
-  pain_points: string[];
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -39,6 +28,9 @@ export default function KnowledgeBuilderPage() {
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
+  const [view, setView] = useState<"profile" | "checklist">("profile");
+  const [checklistItems, setChecklistItems] = useState<KnowledgeItem[]>([]);
+  const [generatingChecklist, setGeneratingChecklist] = useState(false);
 
   // Refs
   const interviewIdRef = useRef<string | null>(null);
@@ -127,6 +119,19 @@ export default function KnowledgeBuilderPage() {
         if (data.status === "complete") {
           setStatus("complete");
           setProfile(data.answers as BusinessProfile);
+
+          // Check if checklist items already exist
+          const { data: existingItems } = await supabase
+            .from("knowledge_items")
+            .select("*")
+            .eq("org_id", orgId)
+            .order("sort_order");
+
+          if (existingItems && existingItems.length > 0) {
+            setChecklistItems(existingItems as KnowledgeItem[]);
+            setView("checklist");
+          }
+
           setPageLoading(false);
           logger.info("knowledge_load_complete", { interviewId: data.id });
           return;
@@ -294,6 +299,100 @@ export default function KnowledgeBuilderPage() {
     }
   }
 
+  // ── Continue to checklist ───────────────────────────────────────────────────
+
+  async function handleContinueToChecklist() {
+    if (!profile || generatingChecklist) return;
+
+    // Already have items in state (e.g. navigated back then forward)
+    if (checklistItems.length > 0) {
+      setView("checklist");
+      return;
+    }
+
+    setGeneratingChecklist(true);
+    try {
+      const orgId = userProfile!.org_id;
+
+      // Check DB first (in case items were generated in a previous session)
+      const { data: existingItems } = await supabase
+        .from("knowledge_items")
+        .select("*")
+        .eq("org_id", orgId)
+        .order("sort_order");
+
+      if (existingItems && existingItems.length > 0) {
+        setChecklistItems(existingItems as KnowledgeItem[]);
+        setView("checklist");
+        return;
+      }
+
+      // Generate via AI
+      const org = await fetchOrgContext();
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        "ai-gateway",
+        {
+          body: {
+            action: "generate-knowledge-checklist",
+            payload: {
+              industry_type: org.industry_type,
+              state: org.state,
+              county: org.county,
+              profile,
+            },
+          },
+        },
+      );
+
+      if (fnError) throw fnError;
+      if (!fnData?.success)
+        throw new Error(fnData?.error ?? "Unknown error from AI gateway");
+
+      const { checklist } = fnData.data;
+
+      // Insert into knowledge_items
+      const rows = checklist.map(
+        (
+          item: {
+            id: string;
+            title: string;
+            description: string;
+            type: string;
+            priority: string;
+            suggested_source: string | null;
+          },
+          idx: number,
+        ) => ({
+          org_id: orgId,
+          title: item.title,
+          description: item.description,
+          type: item.type,
+          priority: item.priority,
+          suggested_source: item.suggested_source || null,
+          status: "pending",
+          sort_order: idx + 1,
+        }),
+      );
+
+      const { data: inserted, error: insertError } = await supabase
+        .from("knowledge_items")
+        .insert(rows)
+        .select();
+
+      if (insertError) throw insertError;
+
+      setChecklistItems(inserted as KnowledgeItem[]);
+      setView("checklist");
+      logger.info("knowledge_checklist_generated", { count: inserted.length });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("knowledge_checklist_error", { message: msg });
+      showToast(msg, "error");
+    } finally {
+      setGeneratingChecklist(false);
+    }
+  }
+
   // ── Render: Loading ─────────────────────────────────────────────────────────
 
   if (pageLoading) {
@@ -308,6 +407,20 @@ export default function KnowledgeBuilderPage() {
   // ── Render: Complete ────────────────────────────────────────────────────────
 
   if (status === "complete" && profile) {
+    // Checklist view
+    if (view === "checklist") {
+      return (
+        <div className="page-enter">
+          <KnowledgeChecklist
+            orgId={userProfile!.org_id}
+            profile={profile}
+            initialItems={checklistItems}
+            onBack={() => setView("profile")}
+          />
+        </div>
+      );
+    }
+
     return (
       <div>
         <h1 className="font-display text-2xl font-600">Knowledge Base</h1>
@@ -416,10 +529,13 @@ export default function KnowledgeBuilderPage() {
             </button>
             <button
               type="button"
-              disabled
-              className="cursor-not-allowed rounded-sm bg-primary px-5 py-2 text-sm font-600 text-white opacity-50"
+              onClick={handleContinueToChecklist}
+              disabled={generatingChecklist}
+              className="rounded-sm bg-primary px-5 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
             >
-              Continue to Document Checklist &rarr;
+              {generatingChecklist
+                ? "Generating Checklist..."
+                : <>Continue to Document Checklist &rarr;</>}
             </button>
           </div>
         </div>
