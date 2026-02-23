@@ -378,3 +378,38 @@
 **Status:** Pending visual verification
 
 ---
+
+### Phase B2: Step 4 Review Draft with AI Step Generation
+**Files modified:**
+- src/components/CreateSOPModal.tsx — Built Step 4 content: auto-generates SOP steps via AI on arrival, editable step cards, add/delete/reorder
+
+**New type:**
+- GeneratedStep — { step_number, title, description }
+- ModalState.generatedSteps typed as GeneratedStep[] (was unknown[])
+
+**New reducer actions:**
+- SET_GENERATED_STEPS — sets full array from AI response
+- UPDATE_STEP — updates step at index (inline edit)
+- DELETE_STEP — removes step at index, renumbers remaining
+- REORDER_STEP — swaps step with neighbor (up/down), renumbers
+- ADD_STEP — appends new step with next step_number
+
+**New local state:**
+- generating, genError — AI call loading/error
+- editingIndex, editTitle, editDescription — inline edit mode
+- addingStep, addTitle, addDescription — add step form
+- hasGeneratedRef — prevents StrictMode double-fire
+
+**Auto-generation:**
+- useEffect watches currentStep; triggers generate-sop-steps AI action when entering Step 4
+- Uses state.transcript + sopTitle prop; context_links and regulation_text empty for now
+- Ref guard prevents re-generation on step re-entry
+
+**Step 4 UI (three states):**
+- Generating: centered spinner + "Generating SOP steps..."
+- Error: warn-light box + Retry button (resets ref guard)
+- Steps loaded: numbered cards with Edit/Delete/Move Up/Move Down, inline edit with Save/Cancel, "+ Add Step" dashed button with inline form
+
+**Status:** Pending visual verification
+
+---

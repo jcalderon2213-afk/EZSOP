@@ -1,5 +1,6 @@
-import { useCallback, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import useSpeechRecognition from "../hooks/useSpeechRecognition";
+import { supabase } from "../lib/supabase";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -10,6 +11,12 @@ interface CreateSOPModalProps {
   sopTitle: string;
 }
 
+interface GeneratedStep {
+  step_number: number;
+  title: string;
+  description: string;
+}
+
 interface ModalState {
   currentStep: number;
   buildMode: "guided" | "talk" | null;
@@ -17,7 +24,7 @@ interface ModalState {
   transcript: string;
   guidedConversation: unknown[];
   coveredTopics: string[];
-  generatedSteps: unknown[];
+  generatedSteps: GeneratedStep[];
   suggestedSteps: unknown[];
   complianceScore: number | null;
   complianceFindings: unknown[];
@@ -28,6 +35,11 @@ type ModalAction =
   | { type: "SET_BUILD_MODE"; mode: ModalState["buildMode"] }
   | { type: "SET_TRANSCRIPT"; transcript: string }
   | { type: "APPEND_TRANSCRIPT"; chunk: string }
+  | { type: "SET_GENERATED_STEPS"; steps: GeneratedStep[] }
+  | { type: "UPDATE_STEP"; index: number; title: string; description: string }
+  | { type: "DELETE_STEP"; index: number }
+  | { type: "REORDER_STEP"; index: number; direction: "up" | "down" }
+  | { type: "ADD_STEP"; title: string; description: string }
   | { type: "SET_FIELD"; field: keyof ModalState; value: unknown }
   | { type: "RESET" };
 
@@ -79,6 +91,40 @@ function reducer(state: ModalState, action: ModalAction): ModalState {
       const separator = prev && !prev.endsWith(" ") && !prev.endsWith("\n") ? " " : "";
       return { ...state, transcript: prev + separator + action.chunk };
     }
+    case "SET_GENERATED_STEPS":
+      return { ...state, generatedSteps: action.steps };
+    case "UPDATE_STEP": {
+      const updated = state.generatedSteps.map((s, i) =>
+        i === action.index
+          ? { ...s, title: action.title, description: action.description }
+          : s,
+      );
+      return { ...state, generatedSteps: updated };
+    }
+    case "DELETE_STEP": {
+      const filtered = state.generatedSteps
+        .filter((_, i) => i !== action.index)
+        .map((s, i) => ({ ...s, step_number: i + 1 }));
+      return { ...state, generatedSteps: filtered };
+    }
+    case "REORDER_STEP": {
+      const arr = [...state.generatedSteps];
+      const swapIndex = action.direction === "up" ? action.index - 1 : action.index + 1;
+      if (swapIndex < 0 || swapIndex >= arr.length) return state;
+      [arr[action.index], arr[swapIndex]] = [arr[swapIndex], arr[action.index]];
+      const renumbered = arr.map((s, i) => ({ ...s, step_number: i + 1 }));
+      return { ...state, generatedSteps: renumbered };
+    }
+    case "ADD_STEP": {
+      const nextNum = state.generatedSteps.length + 1;
+      return {
+        ...state,
+        generatedSteps: [
+          ...state.generatedSteps,
+          { step_number: nextNum, title: action.title, description: action.description },
+        ],
+      };
+    }
     case "SET_FIELD":
       return { ...state, [action.field]: action.value };
     case "RESET":
@@ -105,6 +151,65 @@ export default function CreateSOPModal({
 
   const { isRecording, duration, toggleRecording, isSupported, formatDuration } =
     useSpeechRecognition(handleTranscriptChunk);
+
+  // ── Step 4: Draft generation state ──────────────────────────────────────
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState("");
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [addingStep, setAddingStep] = useState(false);
+  const [addTitle, setAddTitle] = useState("");
+  const [addDescription, setAddDescription] = useState("");
+  const hasGeneratedRef = useRef(false);
+
+  // Auto-generate when entering Step 4
+  useEffect(() => {
+    if (
+      currentStep === 4 &&
+      state.generatedSteps.length === 0 &&
+      !hasGeneratedRef.current &&
+      !generating
+    ) {
+      hasGeneratedRef.current = true;
+      handleGenerate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep]);
+
+  async function handleGenerate() {
+    setGenError("");
+    setGenerating(true);
+
+    try {
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        "ai-gateway",
+        {
+          body: {
+            action: "generate-sop-steps",
+            payload: {
+              transcript: state.transcript || "No transcript provided.",
+              context_links: [],
+              regulation_text: "",
+              sop_title: sopTitle,
+            },
+          },
+        },
+      );
+
+      if (fnError) throw fnError;
+      if (!fnData?.success)
+        throw new Error(fnData?.error ?? "Unknown error from AI gateway");
+
+      const steps = fnData.data.steps as GeneratedStep[];
+      dispatch({ type: "SET_GENERATED_STEPS", steps });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setGenError(message);
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   if (!isOpen) return null;
 
@@ -387,8 +492,220 @@ export default function CreateSOPModal({
                 Guided mode coming soon.
               </p>
             </div>
+          ) : currentStep === 4 ? (
+            /* ── Step 4: Review Draft ────────────────────────────── */
+            <div className="mt-6">
+              {generating ? (
+                /* Loading spinner */
+                <div className="py-10 text-center">
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-card-border border-t-primary" />
+                  <p className="mt-4 text-sm font-500 text-text">
+                    Generating SOP steps...
+                  </p>
+                  <p className="mt-1 text-xs text-text-muted">
+                    This may take a few seconds.
+                  </p>
+                </div>
+              ) : genError ? (
+                /* Error state */
+                <div className="rounded-sm bg-warn-light px-4 py-3 text-sm text-warn">
+                  <p>{genError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      hasGeneratedRef.current = false;
+                      handleGenerate();
+                    }}
+                    className="mt-2 text-sm font-500 text-primary hover:text-primary-hover"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                /* Steps list */
+                <div className="space-y-3">
+                  {state.generatedSteps.map((step, i) => (
+                    <div
+                      key={step.step_number}
+                      className="flex gap-4 rounded border border-card-border bg-card p-4 shadow-sm"
+                    >
+                      {/* Step number badge */}
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-600 text-white">
+                        {i + 1}
+                      </div>
+
+                      {/* Content */}
+                      <div className="min-w-0 flex-1">
+                        {editingIndex === i ? (
+                          <div className="space-y-3">
+                            <input
+                              type="text"
+                              value={editTitle}
+                              onChange={(e) => setEditTitle(e.target.value)}
+                              className="w-full rounded-sm border border-card-border bg-card px-3 py-2 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                              placeholder="Step title"
+                            />
+                            <textarea
+                              rows={3}
+                              value={editDescription}
+                              onChange={(e) => setEditDescription(e.target.value)}
+                              className="w-full resize-y rounded-sm border border-card-border bg-card px-3 py-2 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                              placeholder="Step description"
+                            />
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setEditingIndex(null)}
+                                className="rounded-sm border border-card-border bg-card px-3 py-1.5 text-xs font-500 text-text-muted transition-colors hover:text-text"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!editTitle.trim()}
+                                onClick={() => {
+                                  dispatch({
+                                    type: "UPDATE_STEP",
+                                    index: i,
+                                    title: editTitle.trim(),
+                                    description: editDescription.trim(),
+                                  });
+                                  setEditingIndex(null);
+                                }}
+                                className="rounded-sm bg-primary px-3 py-1.5 text-xs font-600 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-sm font-500 text-text">
+                              {step.title}
+                            </p>
+                            {step.description && (
+                              <p className="mt-1 text-sm text-text-muted whitespace-pre-wrap">
+                                {step.description}
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      {editingIndex !== i && (
+                        <div className="flex shrink-0 items-start gap-1">
+                          {i > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                dispatch({ type: "REORDER_STEP", index: i, direction: "up" })
+                              }
+                              className="rounded px-1.5 py-1 text-xs text-text-muted transition-colors hover:text-text"
+                              title="Move up"
+                            >
+                              ↑
+                            </button>
+                          )}
+                          {i < state.generatedSteps.length - 1 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                dispatch({ type: "REORDER_STEP", index: i, direction: "down" })
+                              }
+                              className="rounded px-1.5 py-1 text-xs text-text-muted transition-colors hover:text-text"
+                              title="Move down"
+                            >
+                              ↓
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingIndex(i);
+                              setEditTitle(step.title);
+                              setEditDescription(step.description);
+                            }}
+                            className="rounded px-1.5 py-1 text-xs text-text-muted transition-colors hover:text-text"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => dispatch({ type: "DELETE_STEP", index: i })}
+                            className="rounded px-1.5 py-1 text-xs text-warn transition-colors hover:text-warn"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+
+                  {/* Add step form */}
+                  {addingStep ? (
+                    <div className="rounded border border-card-border bg-card p-4 shadow-sm">
+                      <div className="space-y-3">
+                        <input
+                          type="text"
+                          value={addTitle}
+                          onChange={(e) => setAddTitle(e.target.value)}
+                          className="w-full rounded-sm border border-card-border bg-card px-3 py-2 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                          placeholder="Step title"
+                        />
+                        <textarea
+                          rows={3}
+                          value={addDescription}
+                          onChange={(e) => setAddDescription(e.target.value)}
+                          className="w-full resize-y rounded-sm border border-card-border bg-card px-3 py-2 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                          placeholder="Step description"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddingStep(false);
+                              setAddTitle("");
+                              setAddDescription("");
+                            }}
+                            className="rounded-sm border border-card-border bg-card px-3 py-1.5 text-xs font-500 text-text-muted transition-colors hover:text-text"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!addTitle.trim()}
+                            onClick={() => {
+                              dispatch({
+                                type: "ADD_STEP",
+                                title: addTitle.trim(),
+                                description: addDescription.trim(),
+                              });
+                              setAddTitle("");
+                              setAddDescription("");
+                              setAddingStep(false);
+                            }}
+                            className="rounded-sm bg-primary px-3 py-1.5 text-xs font-600 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+                          >
+                            Save Step
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setAddingStep(true)}
+                      className="w-full rounded-sm border border-dashed border-card-border px-4 py-2.5 text-sm font-500 text-text-muted transition-colors hover:border-primary hover:text-primary"
+                    >
+                      + Add Step
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           ) : (
-            /* Placeholder for steps 2, 4, 5 */
+            /* Placeholder for steps 2, 5 */
             <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
               <p className="text-sm text-text-light">
                 Step {currentStep} content will go here.
