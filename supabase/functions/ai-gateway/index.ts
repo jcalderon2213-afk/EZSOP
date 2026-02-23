@@ -412,6 +412,112 @@ Return ONLY a valid JSON object. No markdown code fences, no commentary, no expl
         });
       }
 
+      case "ingest-knowledge": {
+        const { profile: kbProfile, items: kbItems } = payload ?? {};
+
+        if (!kbProfile || typeof kbProfile !== "object" || !Array.isArray(kbProfile.services)) {
+          return jsonResponse(
+            { success: false, error: "Missing required field: profile (with services array)" },
+            400,
+          );
+        }
+
+        if (!Array.isArray(kbItems) || kbItems.length === 0) {
+          return jsonResponse(
+            { success: false, error: "Missing required field: items (non-empty array of provided items)" },
+            400,
+          );
+        }
+
+        // Build the collected items list
+        const itemLines = kbItems.map(
+          (item: {
+            title: string;
+            description: string;
+            type: string;
+            provided_url: string | null;
+            provided_file: string | null;
+            provided_text: string | null;
+          }, idx: number) => {
+            const parts = [`${idx + 1}. ${item.title} (${item.type})`];
+            if (item.description) parts.push(`   Description: ${item.description}`);
+            if (item.provided_url) parts.push(`   URL: ${item.provided_url}`);
+            if (item.provided_file) parts.push(`   File: ${item.provided_file}`);
+            if (item.provided_text) parts.push(`   Content: ${item.provided_text}`);
+            return parts.join("\n");
+          },
+        ).join("\n\n");
+
+        const kbUserPrompt = `Synthesize the following business profile and collected compliance documents into a knowledge summary:
+
+BUSINESS PROFILE:
+Industry: ${kbProfile.industry_subtype || "General"}
+Services: ${kbProfile.services?.join(", ") || "Not specified"}
+Client types: ${kbProfile.client_types?.join(", ") || "Not specified"}
+Staff size: ${kbProfile.staff_count_range || "Not specified"}
+Years in operation: ${kbProfile.years_in_operation ?? "Not specified"}
+Licensing bodies: ${kbProfile.licensing_bodies?.join(", ") || "None specified"}
+Certifications held: ${kbProfile.certifications_held?.join(", ") || "None"}
+Special considerations: ${kbProfile.special_considerations?.join(", ") || "None"}
+Has existing SOPs: ${kbProfile.has_existing_sops ? "Yes" : "No"}
+Pain points: ${kbProfile.pain_points?.join(", ") || "None reported"}
+
+COLLECTED DOCUMENTS AND RESOURCES (${kbItems.length} items):
+${itemLines}`;
+
+        const kbMessage = await client.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 4096,
+          system: `You are a compliance knowledge synthesizer. Your job is to distill a business's compliance profile and collected documents/resources into a structured knowledge summary. This summary will be injected as context into future SOP generation and compliance audit calls, so it must be factual and specific — not generic advice.
+
+The summary should be:
+- Comprehensive but concise (1000–2000 words)
+- Organized by topic area with markdown ## headers
+- Written in third person about the business
+- Focused on actionable compliance facts specific to THIS business
+
+Organize into these sections (skip any with no relevant information):
+1. Business Overview — industry, location, services, client types, staff size
+2. Regulatory Framework — applicable regulations, licensing bodies, administrative codes
+3. Licensing & Certifications — current licenses, renewal requirements
+4. Staffing & Training Requirements — mandated training, staff certifications
+5. Operational Requirements — facility standards, record-keeping, reporting obligations
+6. Health & Safety — OSHA, infection control, medication management, emergency protocols
+7. Client Rights & Privacy — HIPAA, ADA, client rights regulations
+8. Known Gaps & Pain Points — challenges the business has identified
+
+Also return a learned_topics array of specific tag-style topic labels covered (e.g. "Oregon AFH Licensing", "Medication Administration Training", "OSHA Compliance"). Aim for 4–10 topics.
+
+Return ONLY a valid JSON object. No markdown code fences, no commentary, no explanation — just the raw JSON object.
+{
+  "knowledge_summary": "Full structured summary with markdown ## headers",
+  "learned_topics": ["Topic 1", "Topic 2"]
+}`,
+          messages: [{ role: "user", content: kbUserPrompt }],
+        });
+
+        const kbText =
+          kbMessage.content[0].type === "text" ? kbMessage.content[0].text : "";
+
+        let kbResult;
+        try {
+          kbResult = JSON.parse(kbText);
+        } catch {
+          return jsonResponse(
+            { success: false, error: "Failed to parse AI response as JSON" },
+            500,
+          );
+        }
+
+        return jsonResponse({
+          success: true,
+          data: {
+            knowledge_summary: kbResult.knowledge_summary,
+            learned_topics: kbResult.learned_topics,
+          },
+        });
+      }
+
       case "test": {
         const prompt = payload?.prompt || "Say hello";
 

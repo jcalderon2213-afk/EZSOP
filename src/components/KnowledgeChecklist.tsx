@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useToast } from "../contexts/ToastContext";
 import { supabase } from "../lib/supabase";
+import logger from "../lib/logger";
 
 // ── Shared Types ─────────────────────────────────────────────────────────────
 
@@ -32,6 +34,16 @@ export interface KnowledgeItem {
   sort_order: number | null;
 }
 
+interface KnowledgeBase {
+  id: string;
+  org_id: string;
+  summary: string;
+  learned_topics: string[];
+  source_count: number;
+  status: string;
+  built_at: string;
+}
+
 // ── Props ────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -51,7 +63,7 @@ const PRIORITY_SECTIONS = [
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function KnowledgeChecklist({ orgId, initialItems, onBack }: Props) {
+export default function KnowledgeChecklist({ orgId, profile, initialItems, onBack }: Props) {
   const { showToast } = useToast();
 
   const [items, setItems] = useState<KnowledgeItem[]>(initialItems);
@@ -65,6 +77,28 @@ export default function KnowledgeChecklist({ orgId, initialItems, onBack }: Prop
     priority: "RECOMMENDED" as KnowledgeItem["priority"],
   });
   const [saving, setSaving] = useState<string | null>(null);
+  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase | null>(null);
+  const [building, setBuilding] = useState(false);
+  const hasCheckedKbRef = useRef(false);
+
+  // Check for existing knowledge_base row on mount
+  useEffect(() => {
+    if (hasCheckedKbRef.current) return;
+    hasCheckedKbRef.current = true;
+
+    (async () => {
+      const { data } = await supabase
+        .from("knowledge_base")
+        .select("*")
+        .eq("org_id", orgId)
+        .eq("status", "complete")
+        .maybeSingle();
+
+      if (data) {
+        setKnowledgeBase(data as KnowledgeBase);
+      }
+    })();
+  }, [orgId]);
 
   // Progress
   const completedCount = items.filter((i) =>
@@ -170,6 +204,97 @@ export default function KnowledgeChecklist({ orgId, initialItems, onBack }: Prop
     setAddForm({ title: "", description: "", type: "DOCUMENT", priority: "RECOMMENDED" });
     setShowAddForm(false);
     showToast("Item added", "success");
+  }
+
+  // ── Build knowledge base ────────────────────────────────────────────────
+
+  const requiredItems = grouped.REQUIRED;
+  const allRequiredDone =
+    requiredItems.length > 0 && requiredItems.every((i) => i.status !== "pending");
+  const providedItems = items.filter((i) =>
+    i.status === "provided" || i.status === "learned",
+  );
+
+  async function handleBuildKnowledgeBase() {
+    if (building) return;
+    setBuilding(true);
+
+    try {
+      // Send only provided/learned items to the AI
+      const itemsPayload = providedItems.map((i) => ({
+        title: i.title,
+        description: i.description,
+        type: i.type,
+        provided_url: i.provided_url,
+        provided_file: i.provided_file,
+        provided_text: i.provided_text,
+      }));
+
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        "ai-gateway",
+        {
+          body: {
+            action: "ingest-knowledge",
+            payload: { profile, items: itemsPayload },
+          },
+        },
+      );
+
+      if (fnError) throw fnError;
+      if (!fnData?.success)
+        throw new Error(fnData?.error ?? "Unknown error from AI gateway");
+
+      const { knowledge_summary, learned_topics } = fnData.data;
+      const now = new Date().toISOString();
+
+      const row = {
+        org_id: orgId,
+        summary: knowledge_summary,
+        learned_topics: learned_topics,
+        source_count: providedItems.length,
+        status: "complete",
+        built_at: now,
+        updated_at: now,
+      };
+
+      // Check for existing row — update or insert
+      const { data: existing } = await supabase
+        .from("knowledge_base")
+        .select("id")
+        .eq("org_id", orgId)
+        .maybeSingle();
+
+      if (existing) {
+        const { error: updateErr } = await supabase
+          .from("knowledge_base")
+          .update(row)
+          .eq("id", existing.id);
+        if (updateErr) throw updateErr;
+
+        setKnowledgeBase({ ...row, id: existing.id } as KnowledgeBase);
+      } else {
+        const { data: inserted, error: insertErr } = await supabase
+          .from("knowledge_base")
+          .insert(row)
+          .select()
+          .single();
+        if (insertErr) throw insertErr;
+
+        setKnowledgeBase(inserted as KnowledgeBase);
+      }
+
+      logger.info("knowledge_base_built", {
+        source_count: providedItems.length,
+        topic_count: learned_topics.length,
+      });
+      showToast("Knowledge base built!", "success");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("knowledge_base_build_error", { message: msg });
+      showToast(msg, "error");
+    } finally {
+      setBuilding(false);
+    }
   }
 
   // ── Type badge ───────────────────────────────────────────────────────────
@@ -479,6 +604,67 @@ export default function KnowledgeChecklist({ orgId, initialItems, onBack }: Prop
           );
         })}
       </div>
+
+      {/* Build Knowledge Base */}
+      {knowledgeBase ? (
+        <div className="mt-8 rounded border border-accent/30 bg-accent-light p-5">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-xs text-white">
+              &#10003;
+            </span>
+            <h3 className="text-sm font-600 text-accent">Knowledge Base Complete</h3>
+          </div>
+          <p className="mt-1 ml-8 text-xs text-text-muted">
+            Built from {knowledgeBase.source_count} source{knowledgeBase.source_count !== 1 ? "s" : ""}
+          </p>
+          <div className="mt-3 ml-8 flex flex-wrap gap-1.5">
+            {knowledgeBase.learned_topics.map((topic) => (
+              <span
+                key={topic}
+                className="rounded-full bg-accent/10 px-2.5 py-1 text-xs font-500 text-accent"
+              >
+                {topic}
+              </span>
+            ))}
+          </div>
+          <p className="mt-3 ml-8 text-xs text-text-light">
+            Last built: {new Date(knowledgeBase.built_at).toLocaleString()}
+          </p>
+          <div className="mt-4 ml-8 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleBuildKnowledgeBase}
+              disabled={building}
+              className="rounded-xs border border-card-border px-4 py-2 text-sm font-500 text-text-muted transition-colors hover:text-text disabled:opacity-50"
+            >
+              {building ? "Rebuilding..." : "Update Knowledge Base"}
+            </button>
+            <Link
+              to="/sops/create"
+              className="rounded-xs bg-primary px-4 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover"
+            >
+              Create SOPs &rarr;
+            </Link>
+          </div>
+        </div>
+      ) : allRequiredDone ? (
+        <div className="mt-8 rounded border border-dashed border-accent/40 bg-accent-light/50 p-5">
+          <h3 className="text-sm font-600 text-text">Build Knowledge Base</h3>
+          <p className="mt-1 text-xs text-text-muted">
+            All required items are complete. Synthesize your {providedItems.length} provided
+            source{providedItems.length !== 1 ? "s" : ""} into a knowledge base that will
+            power your SOP generation and compliance checks.
+          </p>
+          <button
+            type="button"
+            onClick={handleBuildKnowledgeBase}
+            disabled={building || providedItems.length === 0}
+            className="mt-3 rounded-xs bg-accent px-5 py-2 text-sm font-600 text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+          >
+            {building ? "Building Knowledge Base..." : <>Build Knowledge Base &rarr;</>}
+          </button>
+        </div>
+      ) : null}
 
       {/* Add your own */}
       <div className="mt-8 border-t border-card-border pt-6">

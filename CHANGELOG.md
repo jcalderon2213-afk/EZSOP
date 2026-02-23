@@ -2,6 +2,15 @@
 
 ## 2025-02-23
 
+### Phase KB4: Build Knowledge Base (AI Ingest + UI)
+**Files modified:**
+- supabase/functions/ai-gateway/index.ts — Added "ingest-knowledge" action: synthesizes interview profile + provided checklist items into a structured knowledge summary (1000-2000 words) with learned_topics tags. max_tokens: 4096.
+- src/components/KnowledgeChecklist.tsx — Added Build Knowledge Base section with success state. Checks for existing knowledge_base row on mount. Shows build button when all REQUIRED items are done. Success state shows learned_topics as chips, source count, built_at timestamp, Update and Create SOPs buttons.
+
+**Status:** TypeScript clean, Vite build clean
+
+---
+
 ### Phase KB2: Document Checklist View
 **Files created:**
 - src/components/KnowledgeChecklist.tsx — Extracted checklist component with priority-grouped items, type-specific input UIs, progress bar, and Add Your Own form
