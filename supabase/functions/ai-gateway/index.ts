@@ -306,6 +306,112 @@ Adjust total_expected as the conversation progresses. The profile must synthesiz
         return jsonResponse({ success: true, data: interview });
       }
 
+      case "generate-knowledge-checklist": {
+        const { industry_type, state, county, profile } = payload ?? {};
+
+        if (!industry_type || !state) {
+          return jsonResponse(
+            { success: false, error: "Missing required fields: industry_type, state" },
+            400,
+          );
+        }
+
+        if (!profile || typeof profile !== "object" || !Array.isArray(profile.services)) {
+          return jsonResponse(
+            { success: false, error: "Missing required field: profile (with services array)" },
+            400,
+          );
+        }
+
+        const locationParts = [state];
+        if (county) locationParts.push(`${county} County`);
+
+        const userPrompt = `Generate a compliance knowledge base checklist for the following business:
+
+Industry: ${industry_type}
+Specialization: ${profile.industry_subtype || "General"}
+Location: ${locationParts.join(", ")}
+
+Services: ${profile.services.join(", ") || "Not specified"}
+Client types: ${profile.client_types?.join(", ") || "Not specified"}
+Staff size: ${profile.staff_count_range || "Not specified"}
+Years in operation: ${profile.years_in_operation ?? "Not specified"}
+Known licensing bodies: ${profile.licensing_bodies?.join(", ") || "None specified"}
+Certifications held: ${profile.certifications_held?.join(", ") || "None"}
+Special considerations: ${profile.special_considerations?.join(", ") || "None"}
+Has existing SOPs: ${profile.has_existing_sops ? "Yes" : "No"}
+Pain points: ${profile.pain_points?.join(", ") || "None reported"}
+
+Return a JSON object with this shape:
+{
+  "checklist": [
+    {
+      "id": "kb-001",
+      "title": "Document or regulation title",
+      "description": "Why they need this (1-2 sentences)",
+      "type": "LINK" | "PDF" | "DOCUMENT" | "OTHER",
+      "priority": "REQUIRED" | "RECOMMENDED" | "OPTIONAL",
+      "suggested_source": "https://..." or null
+    }
+  ],
+  "governing_bodies": [
+    { "name": "Body name", "level": "federal" | "state" | "county" | "local" }
+  ]
+}`;
+
+        const message = await client.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 3072,
+          system: `You are a regulatory compliance research specialist. Generate a personalized checklist of documents, regulations, licenses, certifications, and reference materials that a business needs to collect for their compliance knowledge base.
+
+Base your recommendations on the specific industry type, geographic location (state and county regulations matter), and the detailed business profile provided. Be specific — reference actual regulation names, administrative rule codes, and licensing requirements where applicable.
+
+For each checklist item:
+- Use specific, real document/regulation titles (e.g. "Oregon Administrative Rules 411-050" not "state licensing rules")
+- Include a suggested_source URL when you are confident it exists (government .gov sites, official regulatory body sites). Set to null if unsure — do NOT fabricate URLs.
+- Categorize the type: LINK (web resource), PDF (downloadable document), DOCUMENT (template/form the user needs to create), OTHER
+- Set priority: REQUIRED (legally mandated for this business), RECOMMENDED (industry best practice), OPTIONAL (helpful but not critical)
+
+Personalization rules:
+- If services include medication administration → include medication management protocols and training requirements
+- If they have employees → include employment law resources, worker safety, HR documentation
+- If specific licensing_bodies are mentioned → include their specific regulatory documents
+- If pain_points mention specific challenges → include resources addressing them
+- If certifications_held lists existing certs → do NOT recommend obtaining those, but include renewal/continuing education resources if relevant
+- If special_considerations mention specific features → include relevant specialized regulations
+- Always include the primary regulatory source for the industry + state
+- Always include applicable federal requirements (OSHA, ADA, etc.)
+
+Generate 8–15 checklist items. Order by priority: REQUIRED first, then RECOMMENDED, then OPTIONAL. Use sequential IDs: "kb-001", "kb-002", etc.
+
+Also generate a governing_bodies array listing all regulatory bodies relevant to this business at federal, state, county, and local levels.
+
+Return ONLY a valid JSON object. No markdown code fences, no commentary, no explanation — just the raw JSON object.`,
+          messages: [{ role: "user", content: userPrompt }],
+        });
+
+        const text =
+          message.content[0].type === "text" ? message.content[0].text : "";
+
+        let result;
+        try {
+          result = JSON.parse(text);
+        } catch {
+          return jsonResponse(
+            { success: false, error: "Failed to parse AI response as JSON" },
+            500,
+          );
+        }
+
+        return jsonResponse({
+          success: true,
+          data: {
+            checklist: result.checklist,
+            governing_bodies: result.governing_bodies,
+          },
+        });
+      }
+
       case "test": {
         const prompt = payload?.prompt || "Say hello";
 
