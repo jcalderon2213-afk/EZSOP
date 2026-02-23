@@ -52,7 +52,7 @@ const TOTAL_STEPS = STEP_LABELS.length;
 
 const initialState: ModalState = {
   currentStep: 1,
-  buildMode: null,
+  buildMode: "guided",
   regulatorySources: [],
   transcript: "",
   guidedConversation: [],
@@ -221,12 +221,78 @@ export default function CreateSOPModal({
             {STEP_SUBTITLES[stepIndex]}
           </p>
 
-          {/* Placeholder content per step */}
-          <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
-            <p className="text-sm text-text-light">
-              Step {currentStep} content will go here.
-            </p>
-          </div>
+          {/* ── Step content ─────────────────────────────────────── */}
+          {currentStep === 1 ? (
+            <div className="mt-6 space-y-4">
+              {/* Helper callout */}
+              <div className="flex gap-3 rounded-sm border border-primary/20 bg-primary-light px-4 py-3">
+                <span className="text-lg leading-none" aria-hidden="true">💡</span>
+                <p className="text-sm text-text-muted">
+                  The build mode determines how we'll capture your process. You can always switch modes later.
+                </p>
+              </div>
+
+              {/* Guided card */}
+              <button
+                type="button"
+                onClick={() => dispatch({ type: "SET_BUILD_MODE", mode: "guided" })}
+                className={`flex w-full items-start gap-4 rounded-sm border px-5 py-4 text-left transition-colors ${
+                  state.buildMode === "guided"
+                    ? "border-primary bg-primary-light"
+                    : "border-card-border bg-card hover:border-primary hover:bg-primary-light"
+                }`}
+              >
+                {/* Radio dot */}
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-primary">
+                  {state.buildMode === "guided" && (
+                    <span className="block h-2.5 w-2.5 rounded-full bg-primary" />
+                  )}
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-600 text-text">Guided</span>
+                    <span className="rounded-xs bg-accent-light px-2 py-0.5 text-[11px] font-600 text-accent">
+                      Recommended
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-text-muted">
+                    We'll ask smart questions one at a time to uncover every step of your process — with suggestions to make it easy.
+                  </p>
+                </div>
+              </button>
+
+              {/* Talk It Out card */}
+              <button
+                type="button"
+                onClick={() => dispatch({ type: "SET_BUILD_MODE", mode: "talk" })}
+                className={`flex w-full items-start gap-4 rounded-sm border px-5 py-4 text-left transition-colors ${
+                  state.buildMode === "talk"
+                    ? "border-primary bg-primary-light"
+                    : "border-card-border bg-card hover:border-primary hover:bg-primary-light"
+                }`}
+              >
+                {/* Radio dot */}
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-primary">
+                  {state.buildMode === "talk" && (
+                    <span className="block h-2.5 w-2.5 rounded-full bg-primary" />
+                  )}
+                </span>
+                <div>
+                  <span className="text-sm font-600 text-text">Talk It Out</span>
+                  <p className="mt-1 text-sm text-text-muted">
+                    Explain your process naturally — record yourself or type it out. We'll organize it into steps.
+                  </p>
+                </div>
+              </button>
+            </div>
+          ) : (
+            /* Placeholder for steps 2–5 */
+            <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
+              <p className="text-sm text-text-light">
+                Step {currentStep} content will go here.
+              </p>
+            </div>
+          )}
         </main>
 
         {/* ── Footer ──────────────────────────────────────────────────── */}
@@ -247,7 +313,12 @@ export default function CreateSOPModal({
             <button
               type="button"
               onClick={goNext}
-              className="rounded-sm bg-primary px-6 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover"
+              disabled={currentStep === 1 && !state.buildMode}
+              className={`rounded-sm bg-primary px-6 py-2 text-sm font-600 text-white transition-colors ${
+                currentStep === 1 && !state.buildMode
+                  ? "cursor-not-allowed opacity-50"
+                  : "hover:bg-primary-hover"
+              }`}
             >
               Continue
             </button>

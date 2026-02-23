@@ -338,3 +338,20 @@
 **Status:** Pending visual verification
 
 ---
+
+### Phase A3: Step 1 Build Mode Selector
+**Files modified:**
+- src/components/CreateSOPModal.tsx — Replaced Step 1 placeholder with Build Mode selector: two radio-style cards (Guided + Talk It Out), helper callout box, pre-selected "guided" default, disabled Continue when no mode selected
+
+**Details:**
+- Guided card: green "Recommended" badge, radio dot, description
+- Talk It Out card: radio dot, description
+- Selected state: border-primary + bg-primary-light; unselected: border-card-border + bg-card with hover highlight
+- Radio dot: 20px circle with 2px primary border, 10px filled inner circle when selected
+- Helper callout: bg-primary-light with light bulb emoji, border-primary/20
+- initialState.buildMode changed from null to "guided" (pre-selected)
+- Continue button disabled + opacity-50 when buildMode is null (edge case guard)
+
+**Status:** Pending visual verification
+
+---
