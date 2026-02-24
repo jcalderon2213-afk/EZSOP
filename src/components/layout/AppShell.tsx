@@ -25,8 +25,6 @@ function AppShellContent() {
       <CreateSOPModal
         isOpen={isOpen}
         onClose={closeCreateSOP}
-        sopId="pending"
-        sopTitle="New SOP"
       />
     </div>
   );

@@ -11,8 +11,15 @@ import { fetchKnowledgeContext } from "../lib/knowledgeContext";
 interface CreateSOPModalProps {
   isOpen: boolean;
   onClose: () => void;
-  sopId: string;
-  sopTitle: string;
+}
+
+interface Recommendation {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  sort_order: number;
+  status: "suggested" | "started" | "completed";
 }
 
 interface GeneratedStep {
@@ -32,6 +39,13 @@ interface ComplianceFinding {
 
 interface ModalState {
   currentStep: number;
+  // Step 1: Choose SOP
+  sopTitle: string;
+  sopCategory: string;
+  sopDescription: string;
+  recommendations: Recommendation[];
+  recommendationsLoading: boolean;
+  // Step 2+: existing fields
   buildMode: "guided" | "talk" | null;
   regulatorySources: string[];
   transcript: string;
@@ -45,6 +59,9 @@ interface ModalState {
 
 type ModalAction =
   | { type: "SET_STEP"; step: number }
+  | { type: "SET_SOP_INFO"; title: string; category: string; description: string }
+  | { type: "SET_RECOMMENDATIONS"; recommendations: Recommendation[] }
+  | { type: "SET_RECOMMENDATIONS_LOADING"; loading: boolean }
   | { type: "SET_BUILD_MODE"; mode: ModalState["buildMode"] }
   | { type: "SET_TRANSCRIPT"; transcript: string }
   | { type: "APPEND_TRANSCRIPT"; chunk: string }
@@ -61,6 +78,7 @@ type ModalAction =
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const STEP_LABELS = [
+  "Choose SOP",
   "Build Mode",
   "Regulatory Context",
   "Capture",
@@ -69,6 +87,7 @@ const STEP_LABELS = [
 ] as const;
 
 const STEP_SUBTITLES = [
+  "Pick a recommended SOP or create your own.",
   "Choose how you'd like to build this SOP.",
   "Select the regulatory frameworks that apply.",
   "Describe your process — speak or type.",
@@ -78,10 +97,24 @@ const STEP_SUBTITLES = [
 
 const TOTAL_STEPS = STEP_LABELS.length;
 
+const CATEGORY_OPTIONS = [
+  "Operations",
+  "HR & Training",
+  "Safety & Compliance",
+  "Client Care",
+  "Administrative",
+  "Other",
+];
+
 // ── Reducer ──────────────────────────────────────────────────────────────────
 
 const initialState: ModalState = {
   currentStep: 1,
+  sopTitle: "",
+  sopCategory: "",
+  sopDescription: "",
+  recommendations: [],
+  recommendationsLoading: false,
   buildMode: "guided",
   regulatorySources: [],
   transcript: "",
@@ -97,6 +130,17 @@ function reducer(state: ModalState, action: ModalAction): ModalState {
   switch (action.type) {
     case "SET_STEP":
       return { ...state, currentStep: action.step };
+    case "SET_SOP_INFO":
+      return {
+        ...state,
+        sopTitle: action.title,
+        sopCategory: action.category,
+        sopDescription: action.description,
+      };
+    case "SET_RECOMMENDATIONS":
+      return { ...state, recommendations: action.recommendations };
+    case "SET_RECOMMENDATIONS_LOADING":
+      return { ...state, recommendationsLoading: action.loading };
     case "SET_BUILD_MODE":
       return { ...state, buildMode: action.mode };
     case "SET_TRANSCRIPT":
@@ -168,7 +212,6 @@ function computeScore(findings: ComplianceFinding[]): number {
 export default function CreateSOPModal({
   isOpen,
   onClose,
-  sopTitle,
 }: CreateSOPModalProps) {
   const navigate = useNavigate();
   const { userProfile } = useAuth();
@@ -185,7 +228,14 @@ export default function CreateSOPModal({
   const { isRecording, duration, toggleRecording, isSupported, formatDuration } =
     useSpeechRecognition(handleTranscriptChunk);
 
-  // ── Step 4: Draft generation state ──────────────────────────────────────
+  // ── Step 1: Recommendations state ─────────────────────────────────────
+  const [recsError, setRecsError] = useState("");
+  const hasLoadedRecsRef = useRef(false);
+  const [customTitle, setCustomTitle] = useState("");
+  const [customCategory, setCustomCategory] = useState(CATEGORY_OPTIONS[0]);
+  const [customDescription, setCustomDescription] = useState("");
+
+  // ── Step 5: Draft generation state ────────────────────────────────────
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -196,7 +246,7 @@ export default function CreateSOPModal({
   const [addDescription, setAddDescription] = useState("");
   const hasGeneratedRef = useRef(false);
 
-  // ── Step 5: Compliance state ───────────────────────────────────────────
+  // ── Step 6: Compliance state ──────────────────────────────────────────
   const [complianceLoading, setComplianceLoading] = useState(false);
   const [complianceError, setComplianceError] = useState("");
   const [resolvedFindings, setResolvedFindings] = useState<Set<number>>(new Set());
@@ -204,10 +254,125 @@ export default function CreateSOPModal({
   const [finalizing, setFinalizing] = useState(false);
   const hasCheckedComplianceRef = useRef(false);
 
-  // Auto-generate when entering Step 4
+  // ── Load/generate recommendations when entering Step 1 ────────────────
+  useEffect(() => {
+    if (currentStep !== 1 || hasLoadedRecsRef.current || !isOpen) return;
+    if (state.recommendations.length > 0) return;
+    hasLoadedRecsRef.current = true;
+    loadRecommendations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, isOpen]);
+
+  async function loadRecommendations() {
+    const orgId = userProfile?.org_id;
+    if (!orgId) return;
+
+    setRecsError("");
+    dispatch({ type: "SET_RECOMMENDATIONS_LOADING", loading: true });
+
+    try {
+      // Check for existing recommendations
+      const { data, error: fetchError } = await supabase
+        .from("sop_recommendations")
+        .select("id, title, category, description, sort_order, status")
+        .eq("org_id", orgId)
+        .is("deleted_at", null)
+        .order("sort_order", { ascending: true });
+
+      if (fetchError) throw fetchError;
+
+      if (data && data.length > 0) {
+        dispatch({ type: "SET_RECOMMENDATIONS", recommendations: data as Recommendation[] });
+        dispatch({ type: "SET_RECOMMENDATIONS_LOADING", loading: false });
+        return;
+      }
+
+      // No existing recs — generate via AI
+      const [orgResult, gbResult, knowledgeContext] = await Promise.all([
+        supabase
+          .from("orgs")
+          .select("industry_type, state, county")
+          .eq("id", orgId)
+          .single(),
+        supabase
+          .from("governing_bodies")
+          .select("name, level")
+          .eq("org_id", orgId)
+          .is("deleted_at", null),
+        fetchKnowledgeContext(orgId),
+      ]);
+
+      if (orgResult.error) throw orgResult.error;
+      if (gbResult.error) throw gbResult.error;
+
+      const org = orgResult.data;
+      const governingBodies = gbResult.data;
+
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        "ai-gateway",
+        {
+          body: {
+            action: "recommend-sops",
+            payload: {
+              industry_type: org.industry_type,
+              state: org.state,
+              county: org.county,
+              governing_bodies: governingBodies,
+              knowledge_context: knowledgeContext,
+            },
+          },
+        },
+      );
+
+      if (fnError) throw fnError;
+      if (!fnData?.success) throw new Error(fnData?.error ?? "Unknown error from AI gateway");
+
+      const recs = fnData.data.recommendations as Array<{
+        title: string;
+        category: string;
+        description: string;
+        sort_order: number;
+      }>;
+
+      // Insert into sop_recommendations
+      const rows = recs.map((rec) => ({
+        org_id: orgId,
+        title: rec.title,
+        category: rec.category,
+        description: rec.description,
+        sort_order: rec.sort_order,
+        status: "suggested",
+      }));
+
+      const { error: insertError } = await supabase
+        .from("sop_recommendations")
+        .insert(rows);
+
+      if (insertError) throw insertError;
+
+      // Re-fetch to get the inserted rows with IDs
+      const { data: inserted, error: refetchError } = await supabase
+        .from("sop_recommendations")
+        .select("id, title, category, description, sort_order, status")
+        .eq("org_id", orgId)
+        .is("deleted_at", null)
+        .order("sort_order", { ascending: true });
+
+      if (refetchError) throw refetchError;
+
+      dispatch({ type: "SET_RECOMMENDATIONS", recommendations: inserted as Recommendation[] });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setRecsError(message);
+    } finally {
+      dispatch({ type: "SET_RECOMMENDATIONS_LOADING", loading: false });
+    }
+  }
+
+  // Auto-generate when entering Step 5
   useEffect(() => {
     if (
-      currentStep === 4 &&
+      currentStep === 5 &&
       state.generatedSteps.length === 0 &&
       !hasGeneratedRef.current &&
       !generating
@@ -218,9 +383,9 @@ export default function CreateSOPModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep]);
 
-  // Auto-run compliance check when entering Step 5
+  // Auto-run compliance check when entering Step 6
   useEffect(() => {
-    if (currentStep !== 5 || hasCheckedComplianceRef.current) return;
+    if (currentStep !== 6 || hasCheckedComplianceRef.current) return;
     hasCheckedComplianceRef.current = true;
     runComplianceCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -262,7 +427,7 @@ export default function CreateSOPModal({
           body: {
             action: "compliance-check",
             payload: {
-              sop_title: sopTitle,
+              sop_title: state.sopTitle,
               steps: state.generatedSteps.map((s) => ({
                 step_number: s.step_number,
                 title: s.title,
@@ -310,7 +475,7 @@ export default function CreateSOPModal({
               transcript: state.transcript || "No transcript provided.",
               context_links: [],
               regulation_text: "",
-              sop_title: sopTitle,
+              sop_title: state.sopTitle,
               knowledge_context: knowledgeContext,
             },
           },
@@ -351,6 +516,27 @@ export default function CreateSOPModal({
     }
   }
 
+  function handleSelectRecommendation(rec: Recommendation) {
+    dispatch({
+      type: "SET_SOP_INFO",
+      title: rec.title,
+      category: rec.category,
+      description: rec.description,
+    });
+    goNext();
+  }
+
+  function handleCustomContinue() {
+    if (!customTitle.trim()) return;
+    dispatch({
+      type: "SET_SOP_INFO",
+      title: customTitle.trim(),
+      category: customCategory,
+      description: customDescription.trim(),
+    });
+    goNext();
+  }
+
   async function handleFinalize() {
     if (!userProfile) return;
     setFinalizing(true);
@@ -360,7 +546,8 @@ export default function CreateSOPModal({
       const { data: sop, error: sopError } = await supabase
         .from("sops")
         .insert({
-          title: sopTitle,
+          title: state.sopTitle,
+          category: state.sopCategory,
           status: "published",
           org_id: userProfile.org_id,
           created_by: userProfile.id,
@@ -409,6 +596,10 @@ export default function CreateSOPModal({
 
   const progressPercent = (currentStep / TOTAL_STEPS) * 100;
 
+  const continueDisabled =
+    (currentStep === 1 && !state.sopTitle) ||
+    (currentStep === 2 && !state.buildMode);
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -425,7 +616,7 @@ export default function CreateSOPModal({
                 Step {currentStep} of {TOTAL_STEPS}
               </p>
               <h2 className="mt-1 font-display text-lg font-600 text-text">
-                {sopTitle}
+                {state.sopTitle || "New SOP"}
               </h2>
             </div>
             <button
@@ -516,6 +707,114 @@ export default function CreateSOPModal({
 
           {/* ── Step content ─────────────────────────────────────── */}
           {currentStep === 1 ? (
+            /* ── Step 1: Choose Your SOP ──────────────────────────── */
+            <div className="mt-6">
+              {state.recommendationsLoading ? (
+                <div className="py-10 text-center">
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-card-border border-t-primary" />
+                  <p className="mt-4 text-sm font-500 text-text">
+                    Generating recommendations for your business...
+                  </p>
+                  <p className="mt-1 text-xs text-text-muted">
+                    This may take a few seconds.
+                  </p>
+                </div>
+              ) : recsError ? (
+                <div className="rounded-sm bg-warn-light px-4 py-3 text-sm text-warn">
+                  <p>{recsError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      hasLoadedRecsRef.current = false;
+                      loadRecommendations();
+                    }}
+                    className="mt-2 text-sm font-500 text-primary hover:text-primary-hover"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Recommendations list */}
+                  {state.recommendations.length > 0 && (
+                    <div className="max-h-[340px] space-y-2 overflow-y-auto pr-1">
+                      {state.recommendations.map((rec) => (
+                        <button
+                          key={rec.id}
+                          type="button"
+                          onClick={() => handleSelectRecommendation(rec)}
+                          className="flex w-full items-start gap-4 rounded border border-card-border bg-card p-4 text-left shadow-sm transition-all hover:border-primary hover:shadow"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-500 text-text">{rec.title}</h4>
+                              <span className="shrink-0 rounded-xs bg-purple-light px-2 py-0.5 text-[11px] font-500 text-purple">
+                                {rec.category}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-text-muted line-clamp-2">
+                              {rec.description}
+                            </p>
+                          </div>
+                          <span className="mt-1 shrink-0 text-xs font-500 text-primary">
+                            Select &rarr;
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Divider */}
+                  <div className="relative my-6">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-card-border" />
+                    </div>
+                    <div className="relative flex justify-center">
+                      <span className="bg-card px-3 text-xs text-text-muted">
+                        Or write your own
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Custom SOP form */}
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={customTitle}
+                      onChange={(e) => setCustomTitle(e.target.value)}
+                      placeholder="SOP Title (required)"
+                      className="w-full rounded-sm border border-card-border bg-card px-3 py-2.5 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                    />
+                    <select
+                      value={customCategory}
+                      onChange={(e) => setCustomCategory(e.target.value)}
+                      className="w-full rounded-sm border border-card-border bg-card px-3 py-2.5 text-sm text-text outline-none focus:border-primary"
+                    >
+                      {CATEGORY_OPTIONS.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                    <textarea
+                      value={customDescription}
+                      onChange={(e) => setCustomDescription(e.target.value)}
+                      rows={2}
+                      placeholder="Brief description (optional)"
+                      className="w-full resize-y rounded-sm border border-card-border bg-card px-3 py-2.5 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCustomContinue}
+                      disabled={!customTitle.trim()}
+                      className="rounded-sm bg-primary px-5 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+                    >
+                      Continue &rarr;
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : currentStep === 2 ? (
+            /* ── Step 2: Build Mode ──────────────────────────────── */
             <div className="mt-6 space-y-4">
               {/* Helper callout */}
               <div className="flex gap-3 rounded-sm border border-primary/20 bg-primary-light px-4 py-3">
@@ -578,8 +877,8 @@ export default function CreateSOPModal({
                 </div>
               </button>
             </div>
-          ) : currentStep === 3 && state.buildMode === "talk" ? (
-            /* ── Step 3: Talk It Out ─────────────────────────────── */
+          ) : currentStep === 4 && state.buildMode === "talk" ? (
+            /* ── Step 4: Talk It Out ─────────────────────────────── */
             <div className="mt-6 space-y-6">
               {/* Mode badge */}
               <div className="flex justify-center">
@@ -656,15 +955,15 @@ export default function CreateSOPModal({
                 </ul>
               </div>
             </div>
-          ) : currentStep === 3 && state.buildMode === "guided" ? (
-            /* ── Step 3: Guided placeholder ──────────────────────── */
+          ) : currentStep === 4 && state.buildMode === "guided" ? (
+            /* ── Step 4: Guided placeholder ──────────────────────── */
             <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
               <p className="text-sm text-text-light">
                 Guided mode coming soon.
               </p>
             </div>
-          ) : currentStep === 4 ? (
-            /* ── Step 4: Review Draft ────────────────────────────── */
+          ) : currentStep === 5 ? (
+            /* ── Step 5: Review Draft ────────────────────────────── */
             <div className="mt-6">
               {generating ? (
                 /* Loading spinner */
@@ -875,8 +1174,8 @@ export default function CreateSOPModal({
                 </div>
               )}
             </div>
-          ) : currentStep === 5 ? (
-            /* ── Step 5: Compliance Audit + Finalize ──────────────── */
+          ) : currentStep === 6 ? (
+            /* ── Step 6: Compliance Audit + Finalize ──────────────── */
             <div className="mt-6">
               {complianceLoading ? (
                 /* Loading spinner */
@@ -1008,7 +1307,7 @@ export default function CreateSOPModal({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => dispatch({ type: "SET_STEP", step: 4 })}
+                                  onClick={() => dispatch({ type: "SET_STEP", step: 5 })}
                                   className="rounded-sm border border-card-border bg-card px-3 py-1.5 text-xs font-500 text-text-muted transition-colors hover:text-text"
                                 >
                                   Update SOP
@@ -1061,7 +1360,7 @@ export default function CreateSOPModal({
               )}
             </div>
           ) : (
-            /* Placeholder for step 2 */
+            /* Placeholder for step 3 (Regulatory Context) */
             <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
               <p className="text-sm text-text-light">
                 Step {currentStep} content will go here.
@@ -1088,9 +1387,9 @@ export default function CreateSOPModal({
             <button
               type="button"
               onClick={goNext}
-              disabled={currentStep === 1 && !state.buildMode}
+              disabled={continueDisabled}
               className={`rounded-sm bg-primary px-6 py-2 text-sm font-600 text-white transition-colors ${
-                currentStep === 1 && !state.buildMode
+                continueDisabled
                   ? "cursor-not-allowed opacity-50"
                   : "hover:bg-primary-hover"
               }`}

@@ -3,8 +3,9 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
-import KnowledgeChecklist from "../components/KnowledgeChecklist";
-import type { BusinessProfile, KnowledgeItem } from "../components/KnowledgeChecklist";
+import KnowledgeBaseTable from "../components/KnowledgeBaseTable";
+import AddSourceModal from "../components/AddSourceModal";
+import type { BusinessProfile, KnowledgeItem, KnowledgeBase } from "../types/knowledge";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,11 @@ export default function KnowledgeBuilderPage() {
   const [view, setView] = useState<"profile" | "checklist">("profile");
   const [checklistItems, setChecklistItems] = useState<KnowledgeItem[]>([]);
   const [generatingChecklist, setGeneratingChecklist] = useState(false);
+  const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBase | null>(null);
+  const [building, setBuilding] = useState(false);
+  const [addSourceOpen, setAddSourceOpen] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestExhausted, setSuggestExhausted] = useState(false);
 
   // Refs
   const interviewIdRef = useRef<string | null>(null);
@@ -50,6 +56,24 @@ export default function KnowledgeBuilderPage() {
     loadInterview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userProfile?.org_id]);
+
+  // Check for existing knowledge_base row when we have items
+  const hasCheckedKbRef = useRef(false);
+  useEffect(() => {
+    if (!userProfile?.org_id || view !== "checklist" || hasCheckedKbRef.current) return;
+    hasCheckedKbRef.current = true;
+
+    (async () => {
+      const { data } = await supabase
+        .from("knowledge_base")
+        .select("*")
+        .eq("org_id", userProfile.org_id)
+        .eq("status", "complete")
+        .maybeSingle();
+
+      if (data) setKnowledgeBase(data as KnowledgeBase);
+    })();
+  }, [userProfile?.org_id, view]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -299,9 +323,9 @@ export default function KnowledgeBuilderPage() {
     }
   }
 
-  // ── Continue to checklist ───────────────────────────────────────────────────
+  // ── Continue to knowledge base ──────────────────────────────────────────────
 
-  async function handleContinueToChecklist() {
+  async function handleContinueToKnowledgeBase() {
     if (!profile || generatingChecklist) return;
 
     // Already have items in state (e.g. navigated back then forward)
@@ -327,13 +351,13 @@ export default function KnowledgeBuilderPage() {
         return;
       }
 
-      // Generate via AI
+      // Generate starter sources via AI
       const org = await fetchOrgContext();
       const { data: fnData, error: fnError } = await supabase.functions.invoke(
         "ai-gateway",
         {
           body: {
-            action: "generate-knowledge-checklist",
+            action: "generate-starter-sources",
             payload: {
               industry_type: org.industry_type,
               state: org.state,
@@ -348,17 +372,17 @@ export default function KnowledgeBuilderPage() {
       if (!fnData?.success)
         throw new Error(fnData?.error ?? "Unknown error from AI gateway");
 
-      const { checklist } = fnData.data;
+      const { sources } = fnData.data;
 
-      // Insert into knowledge_items
-      const rows = checklist.map(
+      // Insert into knowledge_items with level
+      const rows = sources.map(
         (
           item: {
-            id: string;
             title: string;
             description: string;
             type: string;
             priority: string;
+            level: string;
             suggested_source: string | null;
           },
           idx: number,
@@ -368,6 +392,7 @@ export default function KnowledgeBuilderPage() {
           description: item.description,
           type: item.type,
           priority: item.priority,
+          level: item.level || "internal",
           suggested_source: item.suggested_source || null,
           status: "pending",
           sort_order: idx + 1,
@@ -383,13 +408,169 @@ export default function KnowledgeBuilderPage() {
 
       setChecklistItems(inserted as KnowledgeItem[]);
       setView("checklist");
-      logger.info("knowledge_checklist_generated", { count: inserted.length });
+      logger.info("knowledge_starter_sources_generated", { count: inserted.length });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error("knowledge_checklist_error", { message: msg });
+      logger.error("knowledge_starter_sources_error", { message: msg });
       showToast(msg, "error");
     } finally {
       setGeneratingChecklist(false);
+    }
+  }
+
+  // ── Build knowledge base ───────────────────────────────────────────────────
+
+  async function handleBuildKnowledgeBase() {
+    if (building || !profile) return;
+    setBuilding(true);
+
+    try {
+      const orgId = userProfile!.org_id;
+      const providedItems = checklistItems.filter(
+        (i) => i.status === "provided" || i.status === "learned",
+      );
+
+      const itemsPayload = providedItems.map((i) => ({
+        title: i.title,
+        description: i.description,
+        type: i.type,
+        provided_url: i.provided_url,
+        provided_file: i.provided_file,
+        provided_text: i.provided_text,
+      }));
+
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        "ai-gateway",
+        {
+          body: {
+            action: "ingest-knowledge",
+            payload: { profile, items: itemsPayload },
+          },
+        },
+      );
+
+      if (fnError) throw fnError;
+      if (!fnData?.success)
+        throw new Error(fnData?.error ?? "Unknown error from AI gateway");
+
+      const { knowledge_summary, learned_topics } = fnData.data;
+      const now = new Date().toISOString();
+
+      const row = {
+        org_id: orgId,
+        summary: knowledge_summary,
+        learned_topics,
+        source_count: providedItems.length,
+        status: "complete",
+        built_at: now,
+        updated_at: now,
+      };
+
+      const { data: existing } = await supabase
+        .from("knowledge_base")
+        .select("id")
+        .eq("org_id", orgId)
+        .maybeSingle();
+
+      if (existing) {
+        const { error: updateErr } = await supabase
+          .from("knowledge_base")
+          .update(row)
+          .eq("id", existing.id);
+        if (updateErr) throw updateErr;
+        setKnowledgeBase({ ...row, id: existing.id } as KnowledgeBase);
+      } else {
+        const { data: inserted, error: insertErr } = await supabase
+          .from("knowledge_base")
+          .insert(row)
+          .select()
+          .single();
+        if (insertErr) throw insertErr;
+        setKnowledgeBase(inserted as KnowledgeBase);
+      }
+
+      logger.info("knowledge_base_built", {
+        source_count: providedItems.length,
+        topic_count: learned_topics.length,
+      });
+      showToast("Knowledge base built!", "success");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("knowledge_base_build_error", { message: msg });
+      showToast(msg, "error");
+    } finally {
+      setBuilding(false);
+    }
+  }
+
+  // ── Suggest a single source ────────────────────────────────────────────────
+
+  async function handleSuggestSource() {
+    if (suggesting) return;
+    setSuggesting(true);
+
+    try {
+      const org = await fetchOrgContext();
+      const existingTitles = checklistItems.map((i) => i.title);
+
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        "ai-gateway",
+        {
+          body: {
+            action: "generate-single-source",
+            payload: {
+              industry_type: org.industry_type,
+              state: org.state,
+              county: org.county,
+              existing_titles: existingTitles,
+            },
+          },
+        },
+      );
+
+      if (fnError) throw fnError;
+      if (!fnData?.success)
+        throw new Error(fnData?.error ?? "Unknown error from AI gateway");
+
+      const result = fnData.data;
+
+      if (result.exhausted) {
+        setSuggestExhausted(true);
+        showToast("All relevant sources have been suggested", "success");
+        return;
+      }
+
+      const source = result.source;
+      const orgId = userProfile!.org_id;
+      const nextSort = checklistItems.length > 0
+        ? Math.max(...checklistItems.map((i) => i.sort_order ?? 0)) + 1
+        : 1;
+
+      const { data: inserted, error: insertError } = await supabase
+        .from("knowledge_items")
+        .insert({
+          org_id: orgId,
+          title: source.title,
+          description: source.description || "",
+          type: source.type,
+          priority: source.priority,
+          level: source.level || "internal",
+          suggested_source: source.suggested_source || null,
+          status: "pending",
+          sort_order: nextSort,
+        })
+        .select()
+        .single();
+
+      if (insertError) throw new Error(insertError.message);
+
+      setChecklistItems((prev) => [...prev, inserted as KnowledgeItem]);
+      showToast(`Suggested: ${source.title}`, "success");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg, "error");
+    } finally {
+      setSuggesting(false);
     }
   }
 
@@ -407,15 +588,28 @@ export default function KnowledgeBuilderPage() {
   // ── Render: Complete ────────────────────────────────────────────────────────
 
   if (status === "complete" && profile) {
-    // Checklist view
+    // Table view
     if (view === "checklist") {
       return (
         <div className="page-enter">
-          <KnowledgeChecklist
+          <KnowledgeBaseTable
             orgId={userProfile!.org_id}
-            profile={profile}
-            initialItems={checklistItems}
-            onBack={() => setView("profile")}
+            items={checklistItems}
+            onItemsChange={setChecklistItems}
+            knowledgeBase={knowledgeBase}
+            onBuildKnowledgeBase={handleBuildKnowledgeBase}
+            building={building}
+            onOpenAddSource={() => setAddSourceOpen(true)}
+            onSuggestSource={handleSuggestSource}
+            suggesting={suggesting}
+            suggestExhausted={suggestExhausted}
+          />
+          <AddSourceModal
+            isOpen={addSourceOpen}
+            onClose={() => setAddSourceOpen(false)}
+            orgId={userProfile!.org_id}
+            existingCount={checklistItems.length}
+            onSourceAdded={(item) => setChecklistItems((prev) => [...prev, item])}
           />
         </div>
       );
@@ -529,13 +723,13 @@ export default function KnowledgeBuilderPage() {
             </button>
             <button
               type="button"
-              onClick={handleContinueToChecklist}
+              onClick={handleContinueToKnowledgeBase}
               disabled={generatingChecklist}
               className="rounded-sm bg-primary px-5 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
             >
               {generatingChecklist
-                ? "Generating Checklist..."
-                : <>Continue to Document Checklist &rarr;</>}
+                ? "Generating Sources..."
+                : <>Continue to Knowledge Base &rarr;</>}
             </button>
           </div>
         </div>
@@ -558,7 +752,7 @@ export default function KnowledgeBuilderPage() {
       <div>
         <h1 className="font-display text-2xl font-600">Knowledge Base</h1>
         <p className="mt-1 text-sm text-text-muted">
-          Tell us about your business so we can build your compliance checklist.
+          Tell us about your business so we can build your knowledge base.
         </p>
         {progress && (
           <div className="mt-3">

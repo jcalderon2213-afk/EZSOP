@@ -317,6 +317,179 @@ Adjust total_expected as the conversation progresses. The profile must synthesiz
         return jsonResponse({ success: true, data: interview });
       }
 
+      case "generate-single-source": {
+        const { industry_type, state, county, existing_titles } = payload ?? {};
+
+        if (!industry_type || !state) {
+          return jsonResponse(
+            { success: false, error: "Missing required fields: industry_type, state" },
+            400,
+          );
+        }
+
+        const titleList = Array.isArray(existing_titles) && existing_titles.length > 0
+          ? existing_titles.map((t: string, i: number) => `${i + 1}. ${t}`).join("\n")
+          : "(none)";
+
+        const locationParts = [state];
+        if (county) locationParts.push(`${county} County`);
+
+        const singlePrompt = `Suggest ONE new compliance source for a ${industry_type} in ${locationParts.join(", ")}.
+
+Sources already in the knowledge base:
+${titleList}
+
+If you can suggest a useful source that is NOT a duplicate of any listed above, return:
+{
+  "exhausted": false,
+  "source": {
+    "title": "Document or regulation title",
+    "description": "Why they need this (1-2 sentences)",
+    "type": "LINK" | "PDF" | "DOCUMENT" | "OTHER",
+    "priority": "REQUIRED" | "RECOMMENDED" | "OPTIONAL",
+    "level": "federal" | "state" | "county" | "local" | "internal",
+    "suggested_source": "https://..." or null
+  }
+}
+
+If ALL relevant sources are already covered and you have no more useful suggestions, return:
+{ "exhausted": true }`;
+
+        const singleMsg = await client.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1024,
+          system: `You are a regulatory compliance research specialist. Suggest exactly ONE new source document, regulation, license, or reference material for a business's compliance knowledge base. The source must NOT duplicate any title already listed. Use specific, real document names and regulation codes. Only suggest a source if it adds genuine value. Return ONLY valid JSON — no markdown fences, no commentary.`,
+          messages: [{ role: "user", content: singlePrompt }],
+        });
+
+        const singleText =
+          singleMsg.content[0].type === "text" ? singleMsg.content[0].text : "";
+
+        let singleResult;
+        try {
+          singleResult = JSON.parse(singleText);
+        } catch {
+          return jsonResponse(
+            { success: false, error: "Failed to parse AI response as JSON" },
+            500,
+          );
+        }
+
+        return jsonResponse({ success: true, data: singleResult });
+      }
+
+      case "generate-starter-sources": {
+        const { industry_type, state, county, profile } = payload ?? {};
+
+        if (!industry_type || !state) {
+          return jsonResponse(
+            { success: false, error: "Missing required fields: industry_type, state" },
+            400,
+          );
+        }
+
+        if (!profile || typeof profile !== "object" || !Array.isArray(profile.services)) {
+          return jsonResponse(
+            { success: false, error: "Missing required field: profile (with services array)" },
+            400,
+          );
+        }
+
+        const locationParts = [state];
+        if (county) locationParts.push(`${county} County`);
+
+        const userPrompt = `Generate starter knowledge base sources for the following business:
+
+Industry: ${industry_type}
+Specialization: ${profile.industry_subtype || "General"}
+Location: ${locationParts.join(", ")}
+
+Services: ${profile.services.join(", ") || "Not specified"}
+Client types: ${profile.client_types?.join(", ") || "Not specified"}
+Staff size: ${profile.staff_count_range || "Not specified"}
+Years in operation: ${profile.years_in_operation ?? "Not specified"}
+Known licensing bodies: ${profile.licensing_bodies?.join(", ") || "None specified"}
+Certifications held: ${profile.certifications_held?.join(", ") || "None"}
+Special considerations: ${profile.special_considerations?.join(", ") || "None"}
+Has existing SOPs: ${profile.has_existing_sops ? "Yes" : "No"}
+Pain points: ${profile.pain_points?.join(", ") || "None reported"}
+
+Return a JSON object with this shape:
+{
+  "sources": [
+    {
+      "title": "Document or regulation title",
+      "description": "Why they need this (1-2 sentences)",
+      "type": "LINK" | "PDF" | "DOCUMENT" | "OTHER",
+      "priority": "REQUIRED" | "RECOMMENDED" | "OPTIONAL",
+      "level": "federal" | "state" | "county" | "local" | "internal",
+      "suggested_source": "https://..." or null
+    }
+  ],
+  "governing_bodies": [
+    { "name": "Body name", "level": "federal" | "state" | "county" | "local" }
+  ]
+}`;
+
+        const starterMsg = await client.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 3072,
+          system: `You are a regulatory compliance research specialist. Generate a personalized list of source documents, regulations, licenses, certifications, and reference materials that a business needs for their compliance knowledge base.
+
+Base your recommendations on the specific industry type, geographic location (state and county regulations matter), and the detailed business profile provided. Be specific — reference actual regulation names, administrative rule codes, and licensing requirements where applicable.
+
+For each source:
+- Use specific, real document/regulation titles (e.g. "Oregon Administrative Rules 411-050" not "state licensing rules")
+- Include a suggested_source URL when you are confident it exists (government .gov sites, official regulatory body sites). Set to null if unsure — do NOT fabricate URLs.
+- Categorize the type: LINK (web resource), PDF (downloadable document), DOCUMENT (template/form the user needs to create), OTHER
+- Set priority: REQUIRED (legally mandated for this business), RECOMMENDED (industry best practice), OPTIONAL (helpful but not critical)
+- Set level to classify the regulatory scope:
+  - "federal" for national requirements (OSHA, ADA, HIPAA, etc.)
+  - "state" for state-specific regulations, licensing rules, administrative codes
+  - "county" for county-specific requirements
+  - "local" for city or local ordinances
+  - "internal" for business-created documents (handbooks, templates, policies)
+
+Personalization rules:
+- If services include medication administration → include medication management protocols and training requirements
+- If they have employees → include employment law resources, worker safety, HR documentation
+- If specific licensing_bodies are mentioned → include their specific regulatory documents
+- If pain_points mention specific challenges → include resources addressing them
+- If certifications_held lists existing certs → do NOT recommend obtaining those, but include renewal/continuing education resources if relevant
+- If special_considerations mention specific features → include relevant specialized regulations
+- Always include the primary regulatory source for the industry + state
+- Always include applicable federal requirements (OSHA, ADA, etc.)
+
+Generate 8–15 sources. Order by priority: REQUIRED first, then RECOMMENDED, then OPTIONAL.
+
+Also generate a governing_bodies array listing all regulatory bodies relevant to this business at federal, state, county, and local levels.
+
+Return ONLY a valid JSON object. No markdown code fences, no commentary, no explanation — just the raw JSON object.`,
+          messages: [{ role: "user", content: userPrompt }],
+        });
+
+        const starterText =
+          starterMsg.content[0].type === "text" ? starterMsg.content[0].text : "";
+
+        let starterResult;
+        try {
+          starterResult = JSON.parse(starterText);
+        } catch {
+          return jsonResponse(
+            { success: false, error: "Failed to parse AI response as JSON" },
+            500,
+          );
+        }
+
+        return jsonResponse({
+          success: true,
+          data: {
+            sources: starterResult.sources,
+            governing_bodies: starterResult.governing_bodies,
+          },
+        });
+      }
+
       case "generate-knowledge-checklist": {
         const { industry_type, state, county, profile } = payload ?? {};
 
