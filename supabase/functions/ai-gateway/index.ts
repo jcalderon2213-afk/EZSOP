@@ -1,9 +1,11 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
+import { createClient } from "npm:@supabase/supabase-js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "authorization, content-type, x-client-info, apikey",
+  "Access-Control-Allow-Headers":
+    "authorization, content-type, x-client-info, apikey",
 };
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -11,6 +13,76 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
   });
+}
+
+// Create a Supabase client with service role key (bypasses RLS)
+function getSupabaseAdmin() {
+  return createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+}
+
+/**
+ * Fetch relevant knowledge items from the database.
+ * If categories are provided, filters to those categories.
+ * Returns formatted text block for injection into prompts.
+ */
+async function fetchKnowledgeContext(
+  orgId: string,
+  categories?: string[],
+  maxItems = 30,
+): Promise<string> {
+  const supabase = getSupabaseAdmin();
+
+  let query = supabase
+    .from("knowledge_items")
+    .select("title, description, category, level, priority, provided_text, provided_url")
+    .eq("org_id", orgId)
+    .eq("status", "learned")
+    .order("priority", { ascending: true })
+    .limit(maxItems);
+
+  if (categories && categories.length > 0) {
+    query = query.in("category", categories);
+  }
+
+  const { data, error } = await query;
+
+  if (error || !data || data.length === 0) {
+    return "";
+  }
+
+  const lines = data.map(
+    (item: {
+      title: string;
+      description: string | null;
+      category: string | null;
+      level: string | null;
+      priority: string | null;
+      provided_text: string | null;
+      provided_url: string | null;
+    }) => {
+      const parts: string[] = [];
+      parts.push(`### ${item.title}`);
+      if (item.category) parts.push(`Category: ${item.category}`);
+      if (item.level) parts.push(`Level: ${item.level}`);
+      if (item.priority) parts.push(`Priority: ${item.priority}`);
+      if (item.description) parts.push(`Description: ${item.description}`);
+      if (item.provided_url) parts.push(`Source: ${item.provided_url}`);
+      // Include content but truncate to keep prompt size manageable
+      if (item.provided_text) {
+        const truncated =
+          item.provided_text.length > 1500
+            ? item.provided_text.slice(0, 1500) + "\n[...truncated]"
+            : item.provided_text;
+        parts.push(`Content:\n${truncated}`);
+      }
+      return parts.join("\n");
+    },
+  );
+
+  return lines.join("\n\n---\n\n");
 }
 
 Deno.serve(async (req) => {
@@ -32,32 +104,60 @@ Deno.serve(async (req) => {
 
     switch (action) {
       case "recommend-sops": {
-        const { industry_type, state, county, governing_bodies, knowledge_context } = payload ?? {};
+        const {
+          org_id,
+          industry_type,
+          state,
+          county,
+          governing_bodies,
+          knowledge_context,
+        } = payload ?? {};
 
         if (!industry_type || !state) {
           return jsonResponse(
-            { success: false, error: "Missing required fields: industry_type, state" },
+            {
+              success: false,
+              error: "Missing required fields: industry_type, state",
+            },
             400,
           );
         }
 
         const gbList =
           Array.isArray(governing_bodies) && governing_bodies.length > 0
-            ? governing_bodies.map((gb: { name: string; level: string }) => `${gb.name} (${gb.level})`).join(", ")
+            ? governing_bodies
+                .map(
+                  (gb: { name: string; level: string }) =>
+                    `${gb.name} (${gb.level})`,
+                )
+                .join(", ")
             : "None specified";
 
         const locationParts = [state];
         if (county) locationParts.push(`${county} County`);
 
-        const knowledgeSection = knowledge_context
-          ? `\n\nBusiness Knowledge Base (use this to personalize recommendations):\n${knowledge_context}`
-          : "";
+        // Auto-fetch knowledge context from DB if org_id is provided
+        let knowledgeBlock = "";
+        if (org_id) {
+          const dbKnowledge = await fetchKnowledgeContext(org_id, [
+            "rules-and-policies",
+            "documentation",
+            "forms",
+          ]);
+          if (dbKnowledge) {
+            knowledgeBlock = `\n\nOregon AFH Compliance Knowledge Base (use this to personalize recommendations with REAL regulations and forms):\n${dbKnowledge}`;
+          }
+        }
+        // Fall back to frontend-provided context
+        if (!knowledgeBlock && knowledge_context) {
+          knowledgeBlock = `\n\nBusiness Knowledge Base (use this to personalize recommendations):\n${knowledge_context}`;
+        }
 
         const userPrompt = `Generate 8-12 recommended Standard Operating Procedures for the following business:
 
 Industry: ${industry_type}
 Location: ${locationParts.join(", ")}
-Governing bodies: ${gbList}${knowledgeSection}
+Governing bodies: ${gbList}${knowledgeBlock}
 
 Return a JSON array of objects with these fields:
 - "title": short SOP title
@@ -68,7 +168,8 @@ Return a JSON array of objects with these fields:
         const message = await client.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2048,
-          system: "You are a regulatory compliance expert specializing in Standard Operating Procedures for care facilities, healthcare providers, and related industries. Consider the specific industry type, geographic location, and governing bodies when recommending SOPs. Return ONLY a valid JSON array. No markdown code fences, no commentary, no explanation — just the raw JSON array.",
+          system:
+            "You are a regulatory compliance expert specializing in Standard Operating Procedures for Oregon Adult Foster Homes and related care facilities. You have access to the actual Oregon Administrative Rules (OAR 411-049 through 411-052) and official DHS forms. Use specific regulation citations and real form numbers in your recommendations. Return ONLY a valid JSON array. No markdown code fences, no commentary, no explanation — just the raw JSON array.",
           messages: [{ role: "user", content: userPrompt }],
         });
 
@@ -80,7 +181,10 @@ Return a JSON array of objects with these fields:
           recommendations = JSON.parse(text);
         } catch {
           return jsonResponse(
-            { success: false, error: "Failed to parse AI response as JSON" },
+            {
+              success: false,
+              error: "Failed to parse AI response as JSON",
+            },
             500,
           );
         }
@@ -89,11 +193,22 @@ Return a JSON array of objects with these fields:
       }
 
       case "generate-sop-steps": {
-        const { transcript, context_links, regulation_text, sop_title, knowledge_context } = payload ?? {};
+        const {
+          org_id,
+          transcript,
+          context_links,
+          regulation_text,
+          sop_title,
+          sop_category,
+          knowledge_context,
+        } = payload ?? {};
 
         if (!transcript) {
           return jsonResponse(
-            { success: false, error: "Missing required field: transcript" },
+            {
+              success: false,
+              error: "Missing required field: transcript",
+            },
             400,
           );
         }
@@ -101,7 +216,9 @@ Return a JSON array of objects with these fields:
         let contextSection = "";
         if (Array.isArray(context_links) && context_links.length > 0) {
           const linkLines = context_links
-            .map((l: { url: string; label: string }) => `- ${l.label}: ${l.url}`)
+            .map(
+              (l: { url: string; label: string }) => `- ${l.label}: ${l.url}`,
+            )
             .join("\n");
           contextSection = `\n\nReference links:\n${linkLines}`;
         }
@@ -111,26 +228,41 @@ Return a JSON array of objects with these fields:
           regulationSection = `\n\nRelevant regulation text:\n${regulation_text}`;
         }
 
-        const knowledgeSectionSop = knowledge_context
-          ? `\n\nBusiness knowledge base:\n${knowledge_context}`
-          : "";
+        // Auto-fetch knowledge context from DB
+        let knowledgeBlock = "";
+        if (org_id) {
+          // Pick categories relevant to the SOP being generated
+          const relevantCategories = getCategoriesForSop(sop_category || sop_title || "");
+          const dbKnowledge = await fetchKnowledgeContext(
+            org_id,
+            relevantCategories,
+            20,
+          );
+          if (dbKnowledge) {
+            knowledgeBlock = `\n\nOregon AFH Compliance Knowledge Base (reference these REAL regulations, forms, and procedures):\n${dbKnowledge}`;
+          }
+        }
+        if (!knowledgeBlock && knowledge_context) {
+          knowledgeBlock = `\n\nBusiness knowledge base:\n${knowledge_context}`;
+        }
 
         const userPrompt = `Generate structured SOP steps for the following process:
 
 SOP Title: ${sop_title || "Untitled SOP"}
 
 Process description (from user):
-${transcript}${contextSection}${regulationSection}${knowledgeSectionSop}
+${transcript}${contextSection}${regulationSection}${knowledgeBlock}
 
-Break this process into clear, numbered steps. Return a JSON array of objects with these fields:
+Break this process into clear, numbered steps. Reference specific Oregon AFH forms (e.g. APD 0344, APD 0812A) and OAR citations where applicable. Return a JSON array of objects with these fields:
 - "step_number": integer starting at 1
 - "title": concise step title (imperative verb, e.g. "Verify patient identity")
-- "description": detailed description of what to do in this step (2-4 sentences)`;
+- "description": detailed description of what to do in this step (2-4 sentences). Include specific form numbers and OAR references when relevant.`;
 
         const message = await client.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2048,
-          system: "You are an SOP writing expert. Break the described process into clear, actionable, numbered steps. Each step should have a concise title and a detailed description. Keep steps specific and actionable. Use the provided context and regulations to inform the steps, but focus primarily on the user's described process. Return ONLY a valid JSON array. No markdown code fences, no commentary, no explanation — just the raw JSON array.",
+          system:
+            "You are an SOP writing expert for Oregon Adult Foster Homes. You know the Oregon Administrative Rules (OAR 411-049 through 411-052), official DHS/APD forms, and AFH operational best practices. Break the described process into clear, actionable, numbered steps. Reference specific form numbers (APD 0344, APD 0812A, etc.) and OAR sections where applicable. Return ONLY a valid JSON array. No markdown code fences, no commentary, no explanation — just the raw JSON array.",
           messages: [{ role: "user", content: userPrompt }],
         });
 
@@ -142,7 +274,10 @@ Break this process into clear, numbered steps. Return a JSON array of objects wi
           steps = JSON.parse(text);
         } catch {
           return jsonResponse(
-            { success: false, error: "Failed to parse AI response as JSON" },
+            {
+              success: false,
+              error: "Failed to parse AI response as JSON",
+            },
             500,
           );
         }
@@ -151,53 +286,85 @@ Break this process into clear, numbered steps. Return a JSON array of objects wi
       }
 
       case "compliance-check": {
-        const { sop_title, steps: sopSteps, industry_type, state, governing_bodies, knowledge_context } = payload ?? {};
+        const {
+          org_id,
+          sop_title,
+          steps: sopSteps,
+          industry_type,
+          state,
+          governing_bodies,
+          knowledge_context,
+        } = payload ?? {};
 
         if (!sopSteps || !Array.isArray(sopSteps) || sopSteps.length === 0) {
           return jsonResponse(
-            { success: false, error: "Missing required field: steps (array of SOP steps)" },
+            {
+              success: false,
+              error: "Missing required field: steps (array of SOP steps)",
+            },
             400,
           );
         }
 
         const stepsText = sopSteps
-          .map((s: { step_number: number; title: string; description: string }) =>
-            `Step ${s.step_number}: ${s.title}\n${s.description || "No description"}`)
+          .map(
+            (s: {
+              step_number: number;
+              title: string;
+              description: string;
+            }) =>
+              `Step ${s.step_number}: ${s.title}\n${s.description || "No description"}`,
+          )
           .join("\n\n");
 
         let contextInfo = "";
         if (industry_type) contextInfo += `\nIndustry: ${industry_type}`;
         if (state) contextInfo += `\nLocation: ${state}`;
-        if (Array.isArray(governing_bodies) && governing_bodies.length > 0) {
+        if (
+          Array.isArray(governing_bodies) &&
+          governing_bodies.length > 0
+        ) {
           const gbList = governing_bodies
-            .map((gb: { name: string; level: string }) => `${gb.name} (${gb.level})`)
+            .map(
+              (gb: { name: string; level: string }) =>
+                `${gb.name} (${gb.level})`,
+            )
             .join(", ");
           contextInfo += `\nGoverning bodies: ${gbList}`;
         }
 
-        const knowledgeSectionCC = knowledge_context
-          ? `\nBusiness Knowledge Base:\n${knowledge_context}\n`
-          : "";
+        // Auto-fetch ALL knowledge for compliance checking
+        let knowledgeBlock = "";
+        if (org_id) {
+          const dbKnowledge = await fetchKnowledgeContext(org_id, undefined, 40);
+          if (dbKnowledge) {
+            knowledgeBlock = `\n\nOregon AFH Compliance Knowledge Base (check the SOP against these REAL regulations and requirements):\n${dbKnowledge}`;
+          }
+        }
+        if (!knowledgeBlock && knowledge_context) {
+          knowledgeBlock = `\nBusiness Knowledge Base:\n${knowledge_context}\n`;
+        }
 
         const userPrompt = `Review the following SOP for regulatory compliance issues, safety gaps, and best-practice violations:
 
 SOP Title: ${sop_title || "Untitled SOP"}
-${contextInfo ? `\nBusiness context:${contextInfo}` : ""}${knowledgeSectionCC}
+${contextInfo ? `\nBusiness context:${contextInfo}` : ""}${knowledgeBlock}
 SOP Steps:
 ${stepsText}
 
-Identify compliance findings — gaps, risks, or areas that need improvement. For each finding, specify severity and which step it relates to (or null if it's a general issue). Return a JSON array of objects with these fields:
+Identify compliance findings — gaps, risks, or areas that need improvement. Cross-reference against the Oregon Administrative Rules and official forms provided in the knowledge base. For each finding, specify severity and which step it relates to (or null if it's a general issue). Return a JSON array of objects with these fields:
 - "finding_id": integer starting at 1
 - "severity": "high" | "medium" | "low"
 - "title": short description of the issue (1 sentence)
-- "description": detailed explanation of why this is a compliance concern (2-3 sentences)
+- "description": detailed explanation including specific OAR citations or form references (2-3 sentences)
 - "related_step": step number (integer) or null if general
-- "recommendation": what the user should do to address this (1-2 sentences)`;
+- "recommendation": what the user should do to address this, including specific forms or OAR sections (1-2 sentences)`;
 
         const message = await client.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2048,
-          system: "You are a regulatory compliance auditor specializing in Standard Operating Procedures for care facilities, healthcare providers, and related industries. Review SOPs against industry regulations, safety standards, and best practices. Identify gaps, risks, and areas needing improvement. Be thorough but practical — focus on findings that matter. Return ONLY a valid JSON array. No markdown code fences, no commentary, no explanation — just the raw JSON array.",
+          system:
+            "You are a regulatory compliance auditor specializing in Oregon Adult Foster Homes. You audit SOPs against OAR 411-049 through 411-052, official DHS/APD forms, OSHA standards, and Oregon employment law. Cite specific OAR sections and form numbers in your findings. Be thorough but practical — focus on findings that matter. Return ONLY a valid JSON array. No markdown code fences, no commentary, no explanation — just the raw JSON array.",
           messages: [{ role: "user", content: userPrompt }],
         });
 
@@ -209,7 +376,10 @@ Identify compliance findings — gaps, risks, or areas that need improvement. Fo
           findings = JSON.parse(text);
         } catch {
           return jsonResponse(
-            { success: false, error: "Failed to parse AI response as JSON" },
+            {
+              success: false,
+              error: "Failed to parse AI response as JSON",
+            },
             500,
           );
         }
@@ -218,25 +388,32 @@ Identify compliance findings — gaps, risks, or areas that need improvement. Fo
       }
 
       case "knowledge-interview": {
-        const { industry_type, state, county, messages: chatHistory } = payload ?? {};
+        const {
+          industry_type,
+          state,
+          county,
+          messages: chatHistory,
+        } = payload ?? {};
 
         if (!industry_type || !state) {
           return jsonResponse(
-            { success: false, error: "Missing required fields: industry_type, state" },
+            {
+              success: false,
+              error: "Missing required fields: industry_type, state",
+            },
             400,
           );
         }
 
-        // Build the opening user message with business context
         const locationParts = [state];
         if (county) locationParts.push(`${county} County`);
 
         const openingMessage = `I run a ${industry_type} in ${locationParts.join(", ")}. Please start the interview.`;
 
-        // Construct the full messages array: opening context + conversation history
-        const apiMessages: Array<{ role: "user" | "assistant"; content: string }> = [
-          { role: "user", content: openingMessage },
-        ];
+        const apiMessages: Array<{
+          role: "user" | "assistant";
+          content: string;
+        }> = [{ role: "user", content: openingMessage }];
 
         if (Array.isArray(chatHistory) && chatHistory.length > 0) {
           for (const msg of chatHistory) {
@@ -309,7 +486,10 @@ Adjust total_expected as the conversation progresses. The profile must synthesiz
           interview = JSON.parse(text);
         } catch {
           return jsonResponse(
-            { success: false, error: "Failed to parse AI response as JSON" },
+            {
+              success: false,
+              error: "Failed to parse AI response as JSON",
+            },
             500,
           );
         }
@@ -318,18 +498,25 @@ Adjust total_expected as the conversation progresses. The profile must synthesiz
       }
 
       case "generate-single-source": {
-        const { industry_type, state, county, existing_titles } = payload ?? {};
+        const { industry_type, state, county, existing_titles } =
+          payload ?? {};
 
         if (!industry_type || !state) {
           return jsonResponse(
-            { success: false, error: "Missing required fields: industry_type, state" },
+            {
+              success: false,
+              error: "Missing required fields: industry_type, state",
+            },
             400,
           );
         }
 
-        const titleList = Array.isArray(existing_titles) && existing_titles.length > 0
-          ? existing_titles.map((t: string, i: number) => `${i + 1}. ${t}`).join("\n")
-          : "(none)";
+        const titleList =
+          Array.isArray(existing_titles) && existing_titles.length > 0
+            ? existing_titles
+                .map((t: string, i: number) => `${i + 1}. ${t}`)
+                .join("\n")
+            : "(none)";
 
         const locationParts = [state];
         if (county) locationParts.push(`${county} County`);
@@ -363,14 +550,19 @@ If ALL relevant sources are already covered and you have no more useful suggesti
         });
 
         const singleText =
-          singleMsg.content[0].type === "text" ? singleMsg.content[0].text : "";
+          singleMsg.content[0].type === "text"
+            ? singleMsg.content[0].text
+            : "";
 
         let singleResult;
         try {
           singleResult = JSON.parse(singleText);
         } catch {
           return jsonResponse(
-            { success: false, error: "Failed to parse AI response as JSON" },
+            {
+              success: false,
+              error: "Failed to parse AI response as JSON",
+            },
             500,
           );
         }
@@ -383,14 +575,24 @@ If ALL relevant sources are already covered and you have no more useful suggesti
 
         if (!industry_type || !state) {
           return jsonResponse(
-            { success: false, error: "Missing required fields: industry_type, state" },
+            {
+              success: false,
+              error: "Missing required fields: industry_type, state",
+            },
             400,
           );
         }
 
-        if (!profile || typeof profile !== "object" || !Array.isArray(profile.services)) {
+        if (
+          !profile ||
+          typeof profile !== "object" ||
+          !Array.isArray(profile.services)
+        ) {
           return jsonResponse(
-            { success: false, error: "Missing required field: profile (with services array)" },
+            {
+              success: false,
+              error: "Missing required field: profile (with services array)",
+            },
             400,
           );
         }
@@ -450,16 +652,6 @@ For each source:
   - "local" for city or local ordinances
   - "internal" for business-created documents (handbooks, templates, policies)
 
-Personalization rules:
-- If services include medication administration → include medication management protocols and training requirements
-- If they have employees → include employment law resources, worker safety, HR documentation
-- If specific licensing_bodies are mentioned → include their specific regulatory documents
-- If pain_points mention specific challenges → include resources addressing them
-- If certifications_held lists existing certs → do NOT recommend obtaining those, but include renewal/continuing education resources if relevant
-- If special_considerations mention specific features → include relevant specialized regulations
-- Always include the primary regulatory source for the industry + state
-- Always include applicable federal requirements (OSHA, ADA, etc.)
-
 Generate 8–15 sources. Order by priority: REQUIRED first, then RECOMMENDED, then OPTIONAL.
 
 Also generate a governing_bodies array listing all regulatory bodies relevant to this business at federal, state, county, and local levels.
@@ -469,14 +661,19 @@ Return ONLY a valid JSON object. No markdown code fences, no commentary, no expl
         });
 
         const starterText =
-          starterMsg.content[0].type === "text" ? starterMsg.content[0].text : "";
+          starterMsg.content[0].type === "text"
+            ? starterMsg.content[0].text
+            : "";
 
         let starterResult;
         try {
           starterResult = JSON.parse(starterText);
         } catch {
           return jsonResponse(
-            { success: false, error: "Failed to parse AI response as JSON" },
+            {
+              success: false,
+              error: "Failed to parse AI response as JSON",
+            },
             500,
           );
         }
@@ -495,14 +692,24 @@ Return ONLY a valid JSON object. No markdown code fences, no commentary, no expl
 
         if (!industry_type || !state) {
           return jsonResponse(
-            { success: false, error: "Missing required fields: industry_type, state" },
+            {
+              success: false,
+              error: "Missing required fields: industry_type, state",
+            },
             400,
           );
         }
 
-        if (!profile || typeof profile !== "object" || !Array.isArray(profile.services)) {
+        if (
+          !profile ||
+          typeof profile !== "object" ||
+          !Array.isArray(profile.services)
+        ) {
           return jsonResponse(
-            { success: false, error: "Missing required field: profile (with services array)" },
+            {
+              success: false,
+              error: "Missing required field: profile (with services array)",
+            },
             400,
           );
         }
@@ -556,16 +763,6 @@ For each checklist item:
 - Categorize the type: LINK (web resource), PDF (downloadable document), DOCUMENT (template/form the user needs to create), OTHER
 - Set priority: REQUIRED (legally mandated for this business), RECOMMENDED (industry best practice), OPTIONAL (helpful but not critical)
 
-Personalization rules:
-- If services include medication administration → include medication management protocols and training requirements
-- If they have employees → include employment law resources, worker safety, HR documentation
-- If specific licensing_bodies are mentioned → include their specific regulatory documents
-- If pain_points mention specific challenges → include resources addressing them
-- If certifications_held lists existing certs → do NOT recommend obtaining those, but include renewal/continuing education resources if relevant
-- If special_considerations mention specific features → include relevant specialized regulations
-- Always include the primary regulatory source for the industry + state
-- Always include applicable federal requirements (OSHA, ADA, etc.)
-
 Generate 8–15 checklist items. Order by priority: REQUIRED first, then RECOMMENDED, then OPTIONAL. Use sequential IDs: "kb-001", "kb-002", etc.
 
 Also generate a governing_bodies array listing all regulatory bodies relevant to this business at federal, state, county, and local levels.
@@ -582,7 +779,10 @@ Return ONLY a valid JSON object. No markdown code fences, no commentary, no expl
           result = JSON.parse(text);
         } catch {
           return jsonResponse(
-            { success: false, error: "Failed to parse AI response as JSON" },
+            {
+              success: false,
+              error: "Failed to parse AI response as JSON",
+            },
             500,
           );
         }
@@ -599,38 +799,57 @@ Return ONLY a valid JSON object. No markdown code fences, no commentary, no expl
       case "ingest-knowledge": {
         const { profile: kbProfile, items: kbItems } = payload ?? {};
 
-        if (!kbProfile || typeof kbProfile !== "object" || !Array.isArray(kbProfile.services)) {
+        if (
+          !kbProfile ||
+          typeof kbProfile !== "object" ||
+          !Array.isArray(kbProfile.services)
+        ) {
           return jsonResponse(
-            { success: false, error: "Missing required field: profile (with services array)" },
+            {
+              success: false,
+              error: "Missing required field: profile (with services array)",
+            },
             400,
           );
         }
 
         if (!Array.isArray(kbItems) || kbItems.length === 0) {
           return jsonResponse(
-            { success: false, error: "Missing required field: items (non-empty array of provided items)" },
+            {
+              success: false,
+              error:
+                "Missing required field: items (non-empty array of provided items)",
+            },
             400,
           );
         }
 
-        // Build the collected items list
-        const itemLines = kbItems.map(
-          (item: {
-            title: string;
-            description: string;
-            type: string;
-            provided_url: string | null;
-            provided_file: string | null;
-            provided_text: string | null;
-          }, idx: number) => {
-            const parts = [`${idx + 1}. ${item.title} (${item.type})`];
-            if (item.description) parts.push(`   Description: ${item.description}`);
-            if (item.provided_url) parts.push(`   URL: ${item.provided_url}`);
-            if (item.provided_file) parts.push(`   File: ${item.provided_file}`);
-            if (item.provided_text) parts.push(`   Content: ${item.provided_text}`);
-            return parts.join("\n");
-          },
-        ).join("\n\n");
+        const itemLines = kbItems
+          .map(
+            (
+              item: {
+                title: string;
+                description: string;
+                type: string;
+                provided_url: string | null;
+                provided_file: string | null;
+                provided_text: string | null;
+              },
+              idx: number,
+            ) => {
+              const parts = [`${idx + 1}. ${item.title} (${item.type})`];
+              if (item.description)
+                parts.push(`   Description: ${item.description}`);
+              if (item.provided_url)
+                parts.push(`   URL: ${item.provided_url}`);
+              if (item.provided_file)
+                parts.push(`   File: ${item.provided_file}`);
+              if (item.provided_text)
+                parts.push(`   Content: ${item.provided_text}`);
+              return parts.join("\n");
+            },
+          )
+          .join("\n\n");
 
         const kbUserPrompt = `Synthesize the following business profile and collected compliance documents into a knowledge summary:
 
@@ -681,14 +900,19 @@ Return ONLY a valid JSON object. No markdown code fences, no commentary, no expl
         });
 
         const kbText =
-          kbMessage.content[0].type === "text" ? kbMessage.content[0].text : "";
+          kbMessage.content[0].type === "text"
+            ? kbMessage.content[0].text
+            : "";
 
         let kbResult;
         try {
           kbResult = JSON.parse(kbText);
         } catch {
           return jsonResponse(
-            { success: false, error: "Failed to parse AI response as JSON" },
+            {
+              success: false,
+              error: "Failed to parse AI response as JSON",
+            },
             500,
           );
         }
@@ -708,7 +932,8 @@ Return ONLY a valid JSON object. No markdown code fences, no commentary, no expl
         const message = await client.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1024,
-          system: "You are a helpful assistant. Keep responses concise.",
+          system:
+            "You are a helpful assistant. Keep responses concise.",
           messages: [{ role: "user", content: prompt }],
         });
 
@@ -719,10 +944,93 @@ Return ONLY a valid JSON object. No markdown code fences, no commentary, no expl
       }
 
       default:
-        return jsonResponse({ success: false, error: `Unknown action: ${action}` }, 400);
+        return jsonResponse(
+          { success: false, error: `Unknown action: ${action}` },
+          400,
+        );
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return jsonResponse({ success: false, error: message }, 500);
   }
 });
+
+/**
+ * Maps an SOP category or title to relevant knowledge base categories
+ * so we fetch the most relevant content for context.
+ */
+function getCategoriesForSop(sopCategoryOrTitle: string): string[] {
+  const lower = sopCategoryOrTitle.toLowerCase();
+
+  // Always include rules-and-policies as baseline
+  const categories = ["rules-and-policies"];
+
+  if (
+    lower.includes("medication") ||
+    lower.includes("med") ||
+    lower.includes("drug") ||
+    lower.includes("pharmacy")
+  ) {
+    categories.push("forms", "documentation");
+  }
+  if (
+    lower.includes("fire") ||
+    lower.includes("evacuation") ||
+    lower.includes("emergency") ||
+    lower.includes("safety")
+  ) {
+    categories.push("building-safety", "documentation", "forms");
+  }
+  if (
+    lower.includes("hire") ||
+    lower.includes("hiring") ||
+    lower.includes("employee") ||
+    lower.includes("staff") ||
+    lower.includes("training") ||
+    lower.includes("labor")
+  ) {
+    categories.push("employment-labor");
+  }
+  if (
+    lower.includes("medicaid") ||
+    lower.includes("billing") ||
+    lower.includes("payment") ||
+    lower.includes("claims")
+  ) {
+    categories.push("medicaid", "financial");
+  }
+  if (
+    lower.includes("insurance") ||
+    lower.includes("liability") ||
+    lower.includes("workers comp")
+  ) {
+    categories.push("insurance");
+  }
+  if (
+    lower.includes("financial") ||
+    lower.includes("tax") ||
+    lower.includes("bookkeeping") ||
+    lower.includes("accounting")
+  ) {
+    categories.push("financial");
+  }
+  if (
+    lower.includes("inspect") ||
+    lower.includes("license") ||
+    lower.includes("audit") ||
+    lower.includes("compliance")
+  ) {
+    categories.push("documentation", "forms");
+  }
+  if (
+    lower.includes("resident") ||
+    lower.includes("care plan") ||
+    lower.includes("admission") ||
+    lower.includes("discharge")
+  ) {
+    categories.push("forms", "documentation");
+  }
+
+  // Deduplicate
+  return [...new Set(categories)];
+}
