@@ -314,6 +314,7 @@ export default function CreateSOPModal({
           body: {
             action: "recommend-sops",
             payload: {
+              org_id: orgId,
               industry_type: org.industry_type,
               state: org.state,
               county: org.county,
@@ -427,6 +428,7 @@ export default function CreateSOPModal({
           body: {
             action: "compliance-check",
             payload: {
+              org_id: orgId,
               sop_title: state.sopTitle,
               steps: state.generatedSteps.map((s) => ({
                 step_number: s.step_number,
@@ -472,6 +474,7 @@ export default function CreateSOPModal({
           body: {
             action: "generate-sop-steps",
             payload: {
+              org_id: userProfile?.org_id,
               transcript: state.transcript || "No transcript provided.",
               context_links: [],
               regulation_text: "",
