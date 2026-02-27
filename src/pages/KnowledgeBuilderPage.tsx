@@ -205,6 +205,7 @@ export default function KnowledgeBuilderPage() {
           body: {
             action: "knowledge-interview",
             payload: {
+              org_id: userProfile?.org_id,
               industry_type: org.industry_type,
               state: org.state,
               county: org.county,
@@ -359,6 +360,7 @@ export default function KnowledgeBuilderPage() {
           body: {
             action: "generate-starter-sources",
             payload: {
+              org_id: userProfile?.org_id,
               industry_type: org.industry_type,
               state: org.state,
               county: org.county,
@@ -444,7 +446,7 @@ export default function KnowledgeBuilderPage() {
         {
           body: {
             action: "ingest-knowledge",
-            payload: { profile, items: itemsPayload },
+            payload: { org_id: userProfile?.org_id, profile, items: itemsPayload },
           },
         },
       );
@@ -519,6 +521,7 @@ export default function KnowledgeBuilderPage() {
           body: {
             action: "generate-single-source",
             payload: {
+              org_id: userProfile?.org_id,
               industry_type: org.industry_type,
               state: org.state,
               county: org.county,
