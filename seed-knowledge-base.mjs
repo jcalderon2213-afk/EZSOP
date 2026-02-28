@@ -82,6 +82,18 @@ const FOLDER_CONFIG = {
     priority: "REQUIRED",
     type: "DOCUMENT",
   },
+  "manager-training": {
+    category: "manager-training",
+    level: "state",
+    priority: "REQUIRED",
+    type: "DOCUMENT",
+  },
+  "manager-hiring": {
+    category: "manager-hiring",
+    level: "state",
+    priority: "REQUIRED",
+    type: "DOCUMENT",
+  },
 };
 
 // Parse YAML frontmatter from markdown content
@@ -158,8 +170,23 @@ async function main() {
   const files = findMarkdownFiles(AFH_DATABASE_PATH);
   console.log(`Found ${files.length} markdown files.\n`);
 
+  // Fetch existing titles to avoid duplicates
+  const { data: existingItems, error: fetchErr } = await supabase
+    .from("knowledge_items")
+    .select("title")
+    .eq("org_id", ORG_ID);
+
+  if (fetchErr) {
+    console.error("ERROR fetching existing items:", fetchErr.message);
+    process.exit(1);
+  }
+
+  const existingTitles = new Set((existingItems || []).map((item) => item.title));
+  console.log(`Found ${existingTitles.size} existing items in DB (will skip duplicates).\n`);
+
   const records = [];
   let skipped = 0;
+  let dupes = 0;
 
   for (const filePath of files) {
     const rawContent = readFileSync(filePath, "utf-8");
@@ -175,6 +202,13 @@ async function main() {
     }
 
     const title = frontmatter.title || basename(filePath, ".md").replace(/-/g, " ");
+
+    if (existingTitles.has(title)) {
+      console.log(`  SKIP (already exists): ${title}`);
+      dupes++;
+      continue;
+    }
+
     const description = frontmatter.description || null;
     const sourceUrl = frontmatter.source_url || null;
 
@@ -194,7 +228,7 @@ async function main() {
     });
   }
 
-  console.log(`\nPrepared ${records.length} records (${skipped} skipped).\n`);
+  console.log(`\nPrepared ${records.length} records (${skipped} skipped, ${dupes} duplicates).\n`);
 
   // Insert in batches of 20
   const BATCH_SIZE = 20;

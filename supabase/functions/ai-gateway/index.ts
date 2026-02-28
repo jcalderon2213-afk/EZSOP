@@ -992,6 +992,30 @@ function getCategoriesForSop(sopCategoryOrTitle: string): string[] {
     categories.push("employment-labor");
   }
   if (
+    lower.includes("training") ||
+    lower.includes("caregiver") ||
+    lower.includes("orientation") ||
+    lower.includes("abuse") ||
+    lower.includes("reporting") ||
+    lower.includes("preparedness") ||
+    lower.includes("person-centered") ||
+    lower.includes("licensure")
+  ) {
+    categories.push("manager-training");
+  }
+  if (
+    lower.includes("hire") ||
+    lower.includes("hiring") ||
+    lower.includes("background check") ||
+    lower.includes("onboard") ||
+    lower.includes("mentor") ||
+    lower.includes("substitute") ||
+    lower.includes("qualification") ||
+    lower.includes("recruit")
+  ) {
+    categories.push("manager-hiring");
+  }
+  if (
     lower.includes("medicaid") ||
     lower.includes("billing") ||
     lower.includes("payment") ||
