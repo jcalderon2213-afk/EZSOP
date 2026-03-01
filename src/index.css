@@ -1,42 +1,38 @@
 @import "tailwindcss";
 
 @theme {
-  /* Colors */
-  --color-bg: #FAF7F2;
-  --color-sidebar-bg: #2C2520;
-  --color-sidebar-text: #E8DFD4;
-  --color-sidebar-hover: #3E3630;
-  --color-sidebar-active: #5B4F44;
+  /* Colors — Babified blue design language */
+  --color-bg: #f5f5f0;
   --color-card: #FFFFFF;
-  --color-card-border: #E8E0D6;
-  --color-text: #2C2520;
-  --color-text-muted: #8A7E74;
-  --color-text-light: #B0A69C;
-  --color-primary: #D4764E;
-  --color-primary-hover: #C0633B;
-  --color-primary-light: #FFF0E8;
-  --color-accent: #4A8B6E;
-  --color-accent-light: #E6F3EC;
-  --color-accent-hover: #3D7A5E;
-  --color-warn: #C9544A;
-  --color-warn-light: #FDEAE8;
-  --color-info: #5B8DB8;
-  --color-info-light: #E8F1F8;
+  --color-card-border: #e0e0e0;
+  --color-text: #222222;
+  --color-text-muted: #666666;
+  --color-text-light: #999999;
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-light: #e8f0fe;
+  --color-accent: #22c55e;
+  --color-accent-light: #dcfce7;
+  --color-accent-hover: #16a34a;
+  --color-warn: #ef4444;
+  --color-warn-light: #fef2f2;
+  --color-info: #2563eb;
+  --color-info-light: #e8f0fe;
   --color-purple: #7B6BA1;
   --color-purple-light: #F0ECF6;
 
-  /* Fonts */
-  --font-body: "DM Sans", sans-serif;
-  --font-display: "Fraunces", serif;
+  /* Fonts — system font stack for maximum friendliness */
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 
-  /* Border Radius */
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-xs: 6px;
+  /* Border Radius — rounder, friendlier */
+  --radius: 16px;
+  --radius-sm: 10px;
+  --radius-xs: 8px;
 
   /* Box Shadows */
-  --shadow: 0 1px 3px rgba(44, 37, 32, 0.08), 0 4px 12px rgba(44, 37, 32, 0.04);
-  --shadow-lg: 0 4px 16px rgba(44, 37, 32, 0.1), 0 12px 40px rgba(44, 37, 32, 0.06);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 4px 20px rgba(37, 99, 235, 0.12);
 }
 
 body {
