@@ -288,6 +288,10 @@ export default function CreateSOPModal({
     if (!isOpen) {
       hasPrefillRef.current = false;
       isDayInLifeRef.current = false;
+      hasLoadedGuidedRef.current = false;
+      hasLoadedRecsRef.current = false;
+      hasGeneratedRef.current = false;
+      hasCheckedComplianceRef.current = false;
       return;
     }
     if (hasPrefillRef.current) return;
@@ -358,7 +362,7 @@ export default function CreateSOPModal({
       loadGuidedQuestions();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStep]);
+  }, [currentStep, state.buildMode]);
 
   async function loadGuidedQuestions() {
     dispatch({ type: "SET_GUIDED_LOADING" });
