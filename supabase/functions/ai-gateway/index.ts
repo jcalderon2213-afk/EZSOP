@@ -201,6 +201,7 @@ Return a JSON array of objects with these fields:
           sop_title,
           sop_category,
           knowledge_context,
+          is_day_in_life,
         } = payload ?? {};
 
         if (!transcript) {
@@ -246,23 +247,29 @@ Return a JSON array of objects with these fields:
           knowledgeBlock = `\n\nBusiness knowledge base:\n${knowledge_context}`;
         }
 
+        let dayInLifeInstruction = "";
+        if (is_day_in_life) {
+          dayInLifeInstruction = `\n\nIMPORTANT — "Day in the Life" mode: This SOP should document a COMPLETE daily routine at an Oregon Adult Foster Home, organized chronologically from morning to night. Structure the steps as time-based phases (e.g. "Morning Routine", "Medication Administration", "Meal Preparation", "Afternoon Activities", "Evening Wind-Down", "Overnight Procedures"). Each step should cover what happens during that phase. Include regulatory touchpoints naturally within each phase (medication logs, incident documentation, meal planning, etc.).`;
+        }
+
         const userPrompt = `Generate structured SOP steps for the following process:
 
 SOP Title: ${sop_title || "Untitled SOP"}
 
 Process description (from user):
-${transcript}${contextSection}${regulationSection}${knowledgeBlock}
+${transcript}${contextSection}${regulationSection}${knowledgeBlock}${dayInLifeInstruction}
 
 Break this process into clear, numbered steps. Reference specific Oregon AFH forms (e.g. APD 0344, APD 0812A) and OAR citations where applicable. Return a JSON array of objects with these fields:
 - "step_number": integer starting at 1
 - "title": concise step title (imperative verb, e.g. "Verify patient identity")
-- "description": detailed description of what to do in this step (2-4 sentences). Include specific form numbers and OAR references when relevant.`;
+- "description": a SINGLE STRING (not an array!) containing 3-6 bullet points separated by newline characters. Each bullet starts with "• ". Example value: "• Verify the resident's identity using two identifiers\\n• Document verification on APD 0344\\n• File completed form in the resident's record". IMPORTANT: this must be one string with \\n between bullets, NOT a JSON array of strings.
+- "resources": an array of links, forms, documents, or regulations referenced in this step. For each resource: { "type": "url" | "form" | "doc", "label": "Human-readable name (e.g. APD 0411 — Background Check Request)", "url": "https://..." or "" if unknown }. Use type "url" for websites, "form" for forms/applications, "doc" for regulations/documents/guides. If no resources apply to a step, return an empty array [].`;
 
         const message = await client.messages.create({
           model: "claude-sonnet-4-20250514",
           max_tokens: 2048,
           system:
-            "You are an SOP writing expert for Oregon Adult Foster Homes. You know the Oregon Administrative Rules (OAR 411-049 through 411-052), official DHS/APD forms, and AFH operational best practices. Break the described process into clear, actionable, numbered steps. Reference specific form numbers (APD 0344, APD 0812A, etc.) and OAR sections where applicable. Return ONLY a valid JSON array. No markdown code fences, no commentary, no explanation — just the raw JSON array.",
+            "You are an SOP writing expert for Oregon Adult Foster Homes. You know the Oregon Administrative Rules (OAR 411-049 through 411-052), official DHS/APD forms, and AFH operational best practices. Break the described process into clear, actionable, numbered steps. Reference specific form numbers (APD 0344, APD 0812A, etc.) and OAR sections where applicable.\n\nFor each step's \"description\": return a SINGLE STRING (not a JSON array!) containing 3-6 bullet points. Each bullet starts with \"• \" and bullets are separated by \"\\n\" (newline characters inside the string). Each bullet is one short actionable line — no paragraphs, no filler. Focus on WHAT to do, not explaining why.\n\nFor each step's \"resources\": scan the user's transcript AND the regulatory/knowledge context for any mentions of websites, URLs, forms (like APD forms), documents, OAR references, or tools. Extract each one as a resource object with type (\"url\" for websites, \"form\" for forms/applications, \"doc\" for regulations/documents/guides), label, and url (empty string if unknown). If none detected for a step, return an empty array [].\n\nReturn ONLY a valid JSON array. No markdown code fences, no commentary, no explanation — just the raw JSON array.",
           messages: [{ role: "user", content: userPrompt }],
         });
 
@@ -282,7 +289,134 @@ Break this process into clear, numbered steps. Reference specific Oregon AFH for
           );
         }
 
+        // Safety: if AI returned description as an array, join into a string
+        if (Array.isArray(steps)) {
+          for (const step of steps) {
+            if (Array.isArray(step.description)) {
+              step.description = step.description.join("\n");
+            }
+          }
+        }
+
         return jsonResponse({ success: true, data: { steps } });
+      }
+
+      case "generate-guided-questions": {
+        const {
+          org_id: guidedOrgId,
+          sop_title: guidedTitle,
+          sop_category: guidedCategory,
+          is_day_in_life: guidedDayInLife,
+        } = payload ?? {};
+
+        if (!guidedTitle) {
+          return jsonResponse(
+            {
+              success: false,
+              error: "Missing required field: sop_title",
+            },
+            400,
+          );
+        }
+
+        // Fetch knowledge context for regulatory-aware questions
+        let guidedKnowledge = "";
+        if (guidedOrgId) {
+          const relevantCategories = getCategoriesForSop(
+            guidedCategory || guidedTitle || "",
+          );
+          const dbKnowledge = await fetchKnowledgeContext(
+            guidedOrgId,
+            relevantCategories,
+            20,
+          );
+          if (dbKnowledge) {
+            guidedKnowledge = `\n\nOregon AFH Regulatory Context (reference real forms, OAR sections, and requirements in your questions):\n${dbKnowledge}`;
+          }
+        }
+
+        let guidedUserPrompt: string;
+        let guidedSystemPrompt: string;
+
+        if (guidedDayInLife) {
+          guidedUserPrompt = `Generate interview questions to document a typical day at an Oregon Adult Foster Home.${guidedKnowledge}`;
+          guidedSystemPrompt = `You are an SOP interview expert for Oregon Adult Foster Homes. Your job is to ask 5-6 practical multiple-choice questions that capture a complete "Day in the Life" daily routine at an AFH.
+
+Each question should have 3-4 realistic answer choices specific to AFH daily operations. Do NOT include an "Other" option — the frontend handles that.
+
+Your questions should walk through the day chronologically:
+1. What time does the day typically start, and what's the first thing that happens? (e.g. wake-up routine, morning medications, breakfast prep)
+2. How are medications managed throughout the day? (e.g. medication pass times, logging, storage)
+3. What activities or care happen during the middle of the day? (e.g. meals, personal care, appointments, activities)
+4. How do you handle documentation during the day? (e.g. daily logs, incident reports, medication records)
+5. What does the evening and overnight routine look like? (e.g. dinner, evening meds, bedtime, overnight checks)
+6. How do you handle unexpected situations? (e.g. falls, behavioral incidents, medical emergencies)
+
+Use the provided regulatory context to make questions reference real Oregon forms and OAR sections where relevant.
+
+Return ONLY a JSON object in this exact format, no markdown, no backticks:
+{"questions":[{"id":1,"question":"...","answers":["...","...","..."]},{"id":2,"question":"...","answers":["...","...","..."]}]}`;
+        } else {
+          guidedUserPrompt = `Generate interview questions for this SOP: "${guidedTitle}"
+Category: ${guidedCategory || "General"}${guidedKnowledge}`;
+          guidedSystemPrompt = `You are an SOP interview expert for Oregon Adult Foster Homes. Your job is to ask 4-6 practical multiple-choice questions that will capture enough detail to build a complete standard operating procedure.
+
+Each question should have 3-4 realistic answer choices specific to AFH operations. Do NOT include an "Other" option — the frontend handles that.
+
+Your questions should cover these areas as relevant to the SOP topic:
+- Who is responsible for this task?
+- What triggers or starts this process?
+- What are the key steps or actions involved?
+- What gets documented or recorded?
+- What happens if something goes wrong or there's an exception?
+
+Use the provided regulatory context to make questions reference real Oregon forms, OAR sections, and AFH requirements where relevant.
+
+Return ONLY a JSON object in this exact format, no markdown, no backticks:
+{"questions":[{"id":1,"question":"...","answers":["...","...","..."]},{"id":2,"question":"...","answers":["...","...","..."]}]}`;
+        }
+
+        const guidedMessage = await client.messages.create({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1024,
+          system: guidedSystemPrompt,
+          messages: [{ role: "user", content: guidedUserPrompt }],
+        });
+
+        const guidedText =
+          guidedMessage.content[0].type === "text"
+            ? guidedMessage.content[0].text
+            : "";
+
+        let guidedResult;
+        try {
+          guidedResult = JSON.parse(guidedText);
+        } catch {
+          return jsonResponse(
+            {
+              success: false,
+              error: "Failed to parse AI response as JSON",
+            },
+            500,
+          );
+        }
+
+        // Normalize: accept both { questions: [...] } and bare [...]
+        const questions = Array.isArray(guidedResult)
+          ? guidedResult
+          : guidedResult.questions;
+
+        if (!Array.isArray(questions)) {
+          return jsonResponse(
+            {
+              success: false,
+              error: "AI response did not contain a questions array",
+            },
+            500,
+          );
+        }
+
+        return jsonResponse({ success: true, data: { questions } });
       }
 
       case "compliance-check": {

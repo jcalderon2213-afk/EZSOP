@@ -17,12 +17,19 @@ interface SOP {
   updated_at: string;
 }
 
+interface StepLink {
+  type: "url" | "form" | "doc";
+  label: string;
+  url: string;
+}
+
 interface SOPStep {
   id: string;
   sop_id: string;
   step_number: number;
   title: string;
   description: string | null;
+  links: StepLink[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -30,8 +37,8 @@ interface SOPStep {
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<string, string> = {
-  draft: "bg-warn-light text-warn",
-  published: "bg-accent-light text-accent",
+  draft: "bg-[#fef3c7] text-[#92400e]",
+  published: "bg-accent-light text-[#166534]",
   archived: "bg-bg text-text-muted",
 };
 
@@ -45,13 +52,13 @@ const FREQUENCIES = [
 ];
 
 const inputClass =
-  "w-full rounded-sm border border-card-border bg-card px-3 py-2.5 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary";
+  "w-full rounded-[8px] border-2 border-[#e0e0e0] bg-card px-3 py-2.5 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary";
 
 const btnSecondary =
-  "rounded-sm border border-card-border bg-card px-4 py-2 text-sm font-500 text-text-muted transition-colors hover:text-text";
+  "rounded-[8px] border-2 border-[#e0e0e0] bg-card px-5 py-2.5 text-[14px] font-700 text-text-muted transition-colors hover:text-text";
 
 const btnPrimary =
-  "rounded-sm bg-primary px-4 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover disabled:opacity-50";
+  "rounded-[8px] bg-primary px-5 py-2.5 text-[14px] font-700 text-white transition-colors hover:bg-primary-hover disabled:opacity-50";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", {
@@ -102,6 +109,12 @@ export default function SOPDetailPage() {
   const [stepEditTitle, setStepEditTitle] = useState("");
   const [stepEditDescription, setStepEditDescription] = useState("");
   const [stepSaving, setStepSaving] = useState(false);
+
+  // Add link to step
+  const [addingLinkStepId, setAddingLinkStepId] = useState<string | null>(null);
+  const [newLinkLabel, setNewLinkLabel] = useState("");
+  const [newLinkUrl, setNewLinkUrl] = useState("");
+  const [linkSaving, setLinkSaving] = useState(false);
 
   // ── Fetch SOP ────────────────────────────────────────────────────────────────
 
@@ -294,6 +307,34 @@ export default function SOPDetailPage() {
     await fetchSteps();
   }
 
+  // ── Add Link to Step ─────────────────────────────────────────────────────────
+
+  async function handleAddLink(step: SOPStep) {
+    if (!newLinkLabel.trim()) return;
+    setLinkSaving(true);
+
+    const existing: StepLink[] = Array.isArray(step.links) ? step.links : [];
+    const updated = [...existing, { type: "url" as const, label: newLinkLabel.trim(), url: newLinkUrl.trim() }];
+
+    const { error: updateError } = await supabase
+      .from("sop_steps")
+      .update({ links: updated })
+      .eq("id", step.id);
+
+    if (updateError) {
+      showToast(updateError.message, "error");
+      setLinkSaving(false);
+      return;
+    }
+
+    showToast("Link added", "success");
+    setNewLinkLabel("");
+    setNewLinkUrl("");
+    setAddingLinkStepId(null);
+    setLinkSaving(false);
+    await fetchSteps();
+  }
+
   // ── SOP Lifecycle Actions ────────────────────────────────────────────────────
 
   async function handleStatusChange(newStatus: "draft" | "published" | "archived") {
@@ -414,9 +455,9 @@ export default function SOPDetailPage() {
       {/* Back link */}
       <Link
         to="/sops"
-        className="text-sm text-text-muted hover:text-text transition-colors"
+        className="text-[15px] font-700 text-primary hover:underline"
       >
-        &larr; Back to Library
+        &larr; Back to My SOPs
       </Link>
 
       {/* Header */}
@@ -430,10 +471,10 @@ export default function SOPDetailPage() {
               className={inputClass + " max-w-[400px] font-display text-xl font-600"}
             />
           ) : (
-            <h1 className="font-display text-2xl font-600">{sop.title}</h1>
+            <h1 className="text-[28px] font-900">{sop.title}</h1>
           )}
           <span
-            className={`shrink-0 rounded-xs px-2 py-0.5 text-xs font-500 ${STATUS_STYLES[sop.status] ?? STATUS_STYLES.draft}`}
+            className={`shrink-0 rounded-full px-3.5 py-1 text-[13px] font-700 ${STATUS_STYLES[sop.status] ?? STATUS_STYLES.draft}`}
           >
             {sop.status}
           </span>
@@ -461,7 +502,7 @@ export default function SOPDetailPage() {
                   type="button"
                   onClick={() => handleStatusChange("published")}
                   disabled={actionLoading}
-                  className="rounded-sm bg-accent px-4 py-2 text-sm font-600 text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+                  className="rounded-[8px] bg-accent px-5 py-2.5 text-[14px] font-700 text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
                 >
                   Publish
                 </button>
@@ -493,7 +534,7 @@ export default function SOPDetailPage() {
                 type="button"
                 onClick={() => setConfirmDelete(true)}
                 disabled={actionLoading}
-                className="rounded-sm px-4 py-2 text-sm font-500 text-warn transition-colors hover:bg-warn-light disabled:opacity-50"
+                className="rounded-[8px] px-5 py-2.5 text-[14px] font-700 text-warn transition-colors hover:bg-warn-light disabled:opacity-50"
               >
                 Delete
               </button>
@@ -504,7 +545,7 @@ export default function SOPDetailPage() {
 
       {/* Delete confirmation */}
       {confirmDelete && (
-        <div className="mt-4 flex items-center justify-between rounded-sm bg-warn-light px-4 py-3">
+        <div className="mt-4 flex items-center justify-between rounded-[12px] bg-warn-light px-4 py-3">
           <p className="text-sm font-500 text-warn">Are you sure? This cannot be undone.</p>
           <div className="flex gap-2">
             <button
@@ -534,11 +575,11 @@ export default function SOPDetailPage() {
       )}
 
       {/* Detail card */}
-      <div className="mt-6 max-w-[700px] rounded border border-card-border bg-card p-6 shadow">
+      <div className="mt-6 max-w-[700px] rounded-[16px] border-2 border-[#e0e0e0] bg-card p-8 shadow">
         <dl className="space-y-5">
           {/* Category */}
           <div>
-            <dt className="text-xs font-500 text-text-muted uppercase tracking-wide">Category</dt>
+            <dt className="text-[12px] font-700 text-text-muted uppercase tracking-wide">Category</dt>
             {editing ? (
               <input
                 type="text"
@@ -548,7 +589,7 @@ export default function SOPDetailPage() {
                 placeholder="e.g. Health & Safety"
               />
             ) : (
-              <dd className="mt-1 text-sm text-text">
+              <dd className="mt-1 text-[15px] text-text">
                 {sop.category ?? "Uncategorized"}
               </dd>
             )}
@@ -556,7 +597,7 @@ export default function SOPDetailPage() {
 
           {/* Purpose */}
           <div>
-            <dt className="text-xs font-500 text-text-muted uppercase tracking-wide">Purpose</dt>
+            <dt className="text-[12px] font-700 text-text-muted uppercase tracking-wide">Purpose</dt>
             {editing ? (
               <textarea
                 rows={4}
@@ -566,7 +607,7 @@ export default function SOPDetailPage() {
                 placeholder="Describe the purpose of this SOP..."
               />
             ) : (
-              <dd className="mt-1 text-sm text-text whitespace-pre-wrap">
+              <dd className="mt-1 text-[15px] text-text whitespace-pre-wrap">
                 {sop.purpose ?? "No purpose set"}
               </dd>
             )}
@@ -574,7 +615,7 @@ export default function SOPDetailPage() {
 
           {/* Frequency */}
           <div>
-            <dt className="text-xs font-500 text-text-muted uppercase tracking-wide">Frequency</dt>
+            <dt className="text-[12px] font-700 text-text-muted uppercase tracking-wide">Frequency</dt>
             {editing ? (
               <select
                 value={editFrequency}
@@ -587,7 +628,7 @@ export default function SOPDetailPage() {
                 ))}
               </select>
             ) : (
-              <dd className="mt-1 text-sm text-text">
+              <dd className="mt-1 text-[15px] text-text">
                 {sop.frequency ?? "Not set"}
               </dd>
             )}
@@ -596,12 +637,12 @@ export default function SOPDetailPage() {
           {/* Dates */}
           <div className="flex gap-8 border-t border-card-border pt-5">
             <div>
-              <dt className="text-xs font-500 text-text-muted uppercase tracking-wide">Created</dt>
-              <dd className="mt-1 text-sm text-text">{formatDate(sop.created_at)}</dd>
+              <dt className="text-[12px] font-700 text-text-muted uppercase tracking-wide">Created</dt>
+              <dd className="mt-1 text-[15px] text-text">{formatDate(sop.created_at)}</dd>
             </div>
             <div>
-              <dt className="text-xs font-500 text-text-muted uppercase tracking-wide">Last updated</dt>
-              <dd className="mt-1 text-sm text-text">{formatDate(sop.updated_at)}</dd>
+              <dt className="text-[12px] font-700 text-text-muted uppercase tracking-wide">Last updated</dt>
+              <dd className="mt-1 text-[15px] text-text">{formatDate(sop.updated_at)}</dd>
             </div>
           </div>
         </dl>
@@ -610,9 +651,9 @@ export default function SOPDetailPage() {
       {/* ── Steps Section ───────────────────────────────────────────────────── */}
       <div className="mt-10 max-w-[700px]">
         <div className="flex items-center gap-3">
-          <h2 className="font-display text-xl font-600">Steps</h2>
+          <h2 className="text-[22px] font-900">📋 Steps</h2>
           {!stepsLoading && (
-            <span className="rounded-full bg-bg px-2.5 py-0.5 text-xs font-500 text-text-muted">
+            <span className="rounded-full bg-primary-light px-3 py-0.5 text-[13px] font-700 text-primary">
               {steps.length}
             </span>
           )}
@@ -640,10 +681,10 @@ export default function SOPDetailPage() {
             {steps.map((step, i) => (
               <div
                 key={step.id}
-                className="flex gap-4 rounded border border-card-border bg-card p-4 shadow-sm"
+                className="flex gap-4 rounded-[12px] border-2 border-[#e0e0e0] bg-card p-5 shadow-sm"
               >
                 {/* Step number badge */}
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-600 text-white">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[14px] font-800 text-white">
                   {i + 1}
                 </div>
 
@@ -685,12 +726,73 @@ export default function SOPDetailPage() {
                     </div>
                   ) : (
                     <>
-                      <p className="text-sm font-500 text-text">{step.title}</p>
-                      {step.description && (
-                        <p className="mt-1 text-sm text-text-muted whitespace-pre-wrap">
-                          {step.description}
-                        </p>
-                      )}
+                      <p className="text-[15px] font-600 text-text">{step.title}</p>
+                      {step.description && (() => {
+                        const lines = step.description.split("\n").filter((l) => l.trim());
+                        const hasBullets = lines.some((l) => l.trim().startsWith("•"));
+                        if (hasBullets) {
+                          return (
+                            <ul className="mt-1.5 space-y-1">
+                              {lines.map((line, li) => (
+                                <li key={li} className="flex gap-2 text-[14px] text-text-muted">
+                                  <span className="shrink-0 text-primary">•</span>
+                                  <span>{line.replace(/^•\s*/, "")}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          );
+                        }
+                        return (
+                          <p className="mt-1 text-[14px] text-text-muted whitespace-pre-wrap">
+                            {step.description}
+                          </p>
+                        );
+                      })()}
+
+                      {/* Links & Resources */}
+                      <div className="mt-3 border-t border-[#e0e0e0] pt-3">
+                        <p className="text-[12px] font-700 text-text-muted uppercase tracking-wide">🔗 Links & Resources</p>
+                        {Array.isArray(step.links) && step.links.length > 0 ? (
+                          <ul className="mt-1.5 space-y-1">
+                            {step.links.map((link, li) => (
+                              <li key={li} className="flex items-center gap-2 text-[13px]">
+                                <span>{link.type === "form" ? "📄" : link.type === "doc" ? "📋" : "🔗"}</span>
+                                {link.url ? (
+                                  <a href={link.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{link.label}</a>
+                                ) : (
+                                  <span className="text-text-muted">{link.label}</span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="mt-1 text-[12px] text-text-light italic">No links or resources mentioned</p>
+                        )}
+                        {addingLinkStepId === step.id ? (
+                          <div className="mt-2 space-y-2">
+                            <input
+                              type="text"
+                              value={newLinkLabel}
+                              onChange={(e) => setNewLinkLabel(e.target.value)}
+                              className={inputClass + " !py-1.5 !text-[13px]"}
+                              placeholder="Label (e.g. APD 0344 — Incident Report)"
+                            />
+                            <input
+                              type="text"
+                              value={newLinkUrl}
+                              onChange={(e) => setNewLinkUrl(e.target.value)}
+                              className={inputClass + " !py-1.5 !text-[13px]"}
+                              placeholder="URL (optional)"
+                            />
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => { setAddingLinkStepId(null); setNewLinkLabel(""); setNewLinkUrl(""); }} className="text-[12px] font-600 text-text-muted hover:text-text">Cancel</button>
+                              <button type="button" onClick={() => handleAddLink(step)} disabled={linkSaving || !newLinkLabel.trim()} className="text-[12px] font-700 text-primary hover:underline disabled:opacity-50">{linkSaving ? "Saving..." : "Save"}</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => setAddingLinkStepId(step.id)} className="mt-1.5 text-[12px] font-600 text-primary hover:underline">+ Add link or resource</button>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>
@@ -702,7 +804,7 @@ export default function SOPDetailPage() {
                       <button
                         type="button"
                         onClick={() => handleMoveStep(i, "up")}
-                        className="rounded px-1.5 py-1 text-xs text-text-muted hover:text-text transition-colors"
+                        className="rounded px-1.5 py-1 text-[13px] font-600 text-text-muted hover:text-text transition-colors"
                         title="Move up"
                       >
                         ↑
@@ -712,7 +814,7 @@ export default function SOPDetailPage() {
                       <button
                         type="button"
                         onClick={() => handleMoveStep(i, "down")}
-                        className="rounded px-1.5 py-1 text-xs text-text-muted hover:text-text transition-colors"
+                        className="rounded px-1.5 py-1 text-[13px] font-600 text-text-muted hover:text-text transition-colors"
                         title="Move down"
                       >
                         ↓
@@ -721,14 +823,14 @@ export default function SOPDetailPage() {
                     <button
                       type="button"
                       onClick={() => startEditingStep(step)}
-                      className="rounded px-1.5 py-1 text-xs text-text-muted hover:text-text transition-colors"
+                      className="rounded px-1.5 py-1 text-[13px] font-600 text-text-muted hover:text-text transition-colors"
                     >
                       Edit
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteStep(step.id)}
-                      className="rounded px-1.5 py-1 text-xs text-warn hover:text-warn transition-colors"
+                      className="rounded px-1.5 py-1 text-[13px] font-600 text-warn hover:text-warn transition-colors"
                     >
                       Delete
                     </button>
@@ -739,7 +841,7 @@ export default function SOPDetailPage() {
 
             {/* Add step form */}
             {addingStep && (
-              <div className="rounded border border-card-border bg-card p-4 shadow-sm">
+              <div className="rounded-[12px] border-2 border-[#e0e0e0] bg-card p-5 shadow-sm">
                 <div className="space-y-3">
                   <input
                     type="text"
@@ -785,7 +887,7 @@ export default function SOPDetailPage() {
               <button
                 type="button"
                 onClick={() => setAddingStep(true)}
-                className="mt-2 rounded-sm border border-dashed border-card-border px-4 py-2.5 text-sm font-500 text-text-muted transition-colors hover:border-primary hover:text-primary"
+                className="mt-2 rounded-[10px] border-2 border-dashed border-[#e0e0e0] px-5 py-3 text-[14px] font-600 text-text-muted transition-colors hover:border-primary hover:text-primary"
               >
                 + Add Step
               </button>

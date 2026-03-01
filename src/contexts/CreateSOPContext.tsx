@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 export interface SOPPrefillData {
   title?: string;
   readinessItemId?: string;
+  isDayInLife?: boolean;
 }
 
 interface CreateSOPContextValue {

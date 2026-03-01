@@ -1,26 +1,10 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { useCreateSOP } from "../../contexts/CreateSOPContext";
 
-const navGroups = [
-  {
-    items: [
-      { label: "Home", to: "/dashboard", emoji: "🏠" },
-      { label: "My SOPs", to: "/sops", emoji: "📚" },
-      { label: "Business Profile", to: "/profile", emoji: "🏢" },
-      { label: "Knowledge Base", to: "/knowledge", emoji: "📖" },
-    ],
-  },
-  {
-    items: [
-      { label: "Is Juan Ready?", to: "/readiness", emoji: "✅" },
-    ],
-  },
-  {
-    items: [
-      { label: "Practice Mode", to: "/practice", emoji: "💬" },
-      { label: "Compliance Log", to: "/compliance", emoji: "🛡️" },
-    ],
-  },
+const navItems = [
+  { label: "Home", to: "/dashboard", emoji: "🏠" },
+  { label: "My SOPs", to: "/sops", emoji: "📚" },
+  { label: "Is Juan Ready?", to: "/readiness", emoji: "✅" },
 ];
 
 function checkActive(to: string, pathname: string): boolean {
@@ -44,33 +28,26 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-3 py-1">
-        {navGroups.map((group, gi) => (
-          <div key={gi}>
-            {gi > 0 && (
-              <div className="mx-3 my-3 h-px bg-white/10" />
-            )}
-            <ul className="space-y-1">
-              {group.items.map((item) => {
-                const active = checkActive(item.to, pathname);
-                return (
-                  <li key={item.label}>
-                    <NavLink
-                      to={item.to}
-                      className={`flex w-full items-center gap-3.5 rounded-sm px-4 py-3.5 text-[15px] font-600 transition-colors ${
-                        active
-                          ? "bg-primary/20 text-white"
-                          : "hover:bg-white/8 text-[#cbd5e1]"
-                      }`}
-                    >
-                      <span className="text-lg leading-none">{item.emoji}</span>
-                      {item.label}
-                    </NavLink>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
+        <ul className="space-y-1">
+          {navItems.map((item) => {
+            const active = checkActive(item.to, pathname);
+            return (
+              <li key={item.label}>
+                <NavLink
+                  to={item.to}
+                  className={`flex w-full items-center gap-3.5 rounded-sm px-4 py-3.5 text-[15px] font-600 transition-colors ${
+                    active
+                      ? "bg-primary/20 text-white"
+                      : "hover:bg-white/8 text-[#cbd5e1]"
+                  }`}
+                >
+                  <span className="text-lg leading-none">{item.emoji}</span>
+                  {item.label}
+                </NavLink>
+              </li>
+            );
+          })}
+        </ul>
 
         {/* Create SOP button */}
         <div className="mx-3 my-3 h-px bg-white/10" />

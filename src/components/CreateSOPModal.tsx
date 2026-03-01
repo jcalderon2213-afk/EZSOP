@@ -23,10 +23,17 @@ interface Recommendation {
   status: "suggested" | "started" | "completed";
 }
 
+interface StepResource {
+  type: "url" | "form" | "doc";
+  label: string;
+  url: string;
+}
+
 interface GeneratedStep {
   step_number: number;
   title: string;
   description: string;
+  resources?: StepResource[];
 }
 
 interface ComplianceFinding {
@@ -36,6 +43,18 @@ interface ComplianceFinding {
   description: string;
   related_step: number | null;
   recommendation: string;
+}
+
+interface GuidedQuestion {
+  id: number;
+  question: string;
+  answers: string[];
+}
+
+interface GuidedAnswer {
+  questionId: number;
+  question: string;
+  answer: string;
 }
 
 interface ModalState {
@@ -48,14 +67,18 @@ interface ModalState {
   recommendationsLoading: boolean;
   // Step 2+: existing fields
   buildMode: "guided" | "talk" | null;
-  regulatorySources: string[];
   transcript: string;
-  guidedConversation: unknown[];
-  coveredTopics: string[];
   generatedSteps: GeneratedStep[];
-  suggestedSteps: unknown[];
   complianceScore: number | null;
   complianceFindings: ComplianceFinding[];
+  // Guided mode
+  guidedQuestions: GuidedQuestion[];
+  guidedAnswers: GuidedAnswer[];
+  guidedCurrentIndex: number;
+  guidedLoading: boolean;
+  guidedError: string | null;
+  guidedOtherText: string;
+  guidedShowOther: boolean;
 }
 
 type ModalAction =
@@ -74,25 +97,29 @@ type ModalAction =
   | { type: "SET_COMPLIANCE_SCORE"; score: number }
   | { type: "SET_COMPLIANCE_FINDINGS"; findings: ComplianceFinding[] }
   | { type: "SET_FIELD"; field: keyof ModalState; value: unknown }
+  | { type: "SET_GUIDED_QUESTIONS"; questions: GuidedQuestion[] }
+  | { type: "SET_GUIDED_ANSWER"; questionId: number; question: string; answer: string }
+  | { type: "SET_GUIDED_LOADING" }
+  | { type: "SET_GUIDED_ERROR"; error: string }
+  | { type: "SET_GUIDED_OTHER_TEXT"; text: string }
+  | { type: "TOGGLE_GUIDED_OTHER" }
   | { type: "RESET" };
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const STEP_LABELS = [
-  "Choose SOP",
+  "Pick a Procedure",
   "Build Mode",
-  "Regulatory Context",
-  "Capture",
-  "Review Draft",
+  "Describe It",
+  "Review Steps",
   "Compliance",
 ] as const;
 
 const STEP_SUBTITLES = [
   "Pick a recommended SOP or create your own.",
-  "Choose how you'd like to build this SOP.",
-  "Select the regulatory frameworks that apply.",
-  "Describe your process — speak or type.",
-  "Review and refine the generated draft.",
+  "How do you want to build it?",
+  "Describe how you do it — speak or type.",
+  "Review and refine the generated steps.",
   "Check compliance and finalize.",
 ] as const;
 
@@ -107,6 +134,15 @@ const CATEGORY_OPTIONS = [
   "Other",
 ];
 
+const CATEGORY_EMOJI: Record<string, string> = {
+  "Operations": "⚙️",
+  "HR & Training": "👥",
+  "Safety & Compliance": "🛡️",
+  "Client Care": "💝",
+  "Administrative": "📋",
+  "Other": "📌",
+};
+
 // ── Reducer ──────────────────────────────────────────────────────────────────
 
 const initialState: ModalState = {
@@ -117,14 +153,17 @@ const initialState: ModalState = {
   recommendations: [],
   recommendationsLoading: false,
   buildMode: "guided",
-  regulatorySources: [],
   transcript: "",
-  guidedConversation: [],
-  coveredTopics: [],
   generatedSteps: [],
-  suggestedSteps: [],
   complianceScore: null,
   complianceFindings: [],
+  guidedQuestions: [],
+  guidedAnswers: [],
+  guidedCurrentIndex: 0,
+  guidedLoading: false,
+  guidedError: null,
+  guidedOtherText: "",
+  guidedShowOther: false,
 };
 
 function reducer(state: ModalState, action: ModalAction): ModalState {
@@ -189,6 +228,24 @@ function reducer(state: ModalState, action: ModalAction): ModalState {
       return { ...state, complianceScore: action.score };
     case "SET_COMPLIANCE_FINDINGS":
       return { ...state, complianceFindings: action.findings };
+    case "SET_GUIDED_QUESTIONS":
+      return { ...state, guidedQuestions: action.questions, guidedLoading: false, guidedError: null };
+    case "SET_GUIDED_ANSWER":
+      return {
+        ...state,
+        guidedAnswers: [...state.guidedAnswers, { questionId: action.questionId, question: action.question, answer: action.answer }],
+        guidedCurrentIndex: state.guidedCurrentIndex + 1,
+        guidedShowOther: false,
+        guidedOtherText: "",
+      };
+    case "SET_GUIDED_LOADING":
+      return { ...state, guidedLoading: true, guidedError: null };
+    case "SET_GUIDED_ERROR":
+      return { ...state, guidedError: action.error, guidedLoading: false };
+    case "SET_GUIDED_OTHER_TEXT":
+      return { ...state, guidedOtherText: action.text };
+    case "TOGGLE_GUIDED_OTHER":
+      return { ...state, guidedShowOther: !state.guidedShowOther, guidedOtherText: "" };
     case "SET_FIELD":
       return { ...state, [action.field]: action.value };
     case "RESET":
@@ -226,9 +283,11 @@ export default function CreateSOPModal({
   // ── Consume prefill data when modal opens ───────────────────────────
   const hasPrefillRef = useRef(false);
   const readinessItemIdRef = useRef<string | null>(null);
+  const isDayInLifeRef = useRef(false);
   useEffect(() => {
     if (!isOpen) {
       hasPrefillRef.current = false;
+      isDayInLifeRef.current = false;
       return;
     }
     if (hasPrefillRef.current) return;
@@ -240,14 +299,15 @@ export default function CreateSOPModal({
       dispatch({
         type: "SET_SOP_INFO",
         title: prefill.title,
-        category: "",
+        category: prefill.isDayInLife ? "Operations" : "",
         description: "",
       });
-      // Skip Step 1 (Choose SOP) — go straight to Step 2 (Build Mode)
+      // Skip Step 1 (Pick a Procedure) — go straight to Step 2 (Build Mode)
       dispatch({ type: "SET_STEP", step: 2 });
     }
     // Store readiness item ID for linking after finalization
     readinessItemIdRef.current = prefill?.readinessItemId ?? null;
+    isDayInLifeRef.current = prefill?.isDayInLife ?? false;
   }, [isOpen, consumePrefill]);
 
   const handleTranscriptChunk = useCallback((chunk: string) => {
@@ -264,7 +324,7 @@ export default function CreateSOPModal({
   const [customCategory, setCustomCategory] = useState(CATEGORY_OPTIONS[0]);
   const [customDescription, setCustomDescription] = useState("");
 
-  // ── Step 5: Draft generation state ────────────────────────────────────
+  // ── Step 4: Draft generation state ────────────────────────────────────
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState("");
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -275,13 +335,61 @@ export default function CreateSOPModal({
   const [addDescription, setAddDescription] = useState("");
   const hasGeneratedRef = useRef(false);
 
-  // ── Step 6: Compliance state ──────────────────────────────────────────
+  // ── Step 5: Compliance state ──────────────────────────────────────────
   const [complianceLoading, setComplianceLoading] = useState(false);
   const [complianceError, setComplianceError] = useState("");
   const [resolvedFindings, setResolvedFindings] = useState<Set<number>>(new Set());
   const [confirmed, setConfirmed] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
   const hasCheckedComplianceRef = useRef(false);
+
+  // ── Step 3 Guided: load questions ───────────────────────────────────────
+  const hasLoadedGuidedRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      currentStep === 3 &&
+      state.buildMode === "guided" &&
+      state.guidedQuestions.length === 0 &&
+      !state.guidedLoading &&
+      !hasLoadedGuidedRef.current
+    ) {
+      hasLoadedGuidedRef.current = true;
+      loadGuidedQuestions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep]);
+
+  async function loadGuidedQuestions() {
+    dispatch({ type: "SET_GUIDED_LOADING" });
+
+    try {
+      const { data: fnData, error: fnError } = await supabase.functions.invoke(
+        "ai-gateway",
+        {
+          body: {
+            action: "generate-guided-questions",
+            payload: {
+              sop_title: state.sopTitle,
+              sop_category: state.sopCategory,
+              org_id: userProfile?.org_id,
+              is_day_in_life: isDayInLifeRef.current,
+            },
+          },
+        },
+      );
+
+      if (fnError) throw fnError;
+      if (!fnData?.success)
+        throw new Error(fnData?.error ?? "Unknown error from AI gateway");
+
+      const questions = fnData.data.questions as GuidedQuestion[];
+      dispatch({ type: "SET_GUIDED_QUESTIONS", questions });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      dispatch({ type: "SET_GUIDED_ERROR", error: message });
+    }
+  }
 
   // ── Load/generate recommendations when entering Step 1 ────────────────
   useEffect(() => {
@@ -399,10 +507,10 @@ export default function CreateSOPModal({
     }
   }
 
-  // Auto-generate when entering Step 5
+  // Auto-generate when entering Step 4 (Review Steps)
   useEffect(() => {
     if (
-      currentStep === 5 &&
+      currentStep === 4 &&
       state.generatedSteps.length === 0 &&
       !hasGeneratedRef.current &&
       !generating
@@ -413,9 +521,9 @@ export default function CreateSOPModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep]);
 
-  // Auto-run compliance check when entering Step 6
+  // Auto-run compliance check when entering Step 5
   useEffect(() => {
-    if (currentStep !== 6 || hasCheckedComplianceRef.current) return;
+    if (currentStep !== 5 || hasCheckedComplianceRef.current) return;
     hasCheckedComplianceRef.current = true;
     runComplianceCheck();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -426,7 +534,6 @@ export default function CreateSOPModal({
     setComplianceLoading(true);
 
     try {
-      // Fetch org context in parallel
       const orgId = userProfile?.org_id;
       if (!orgId) throw new Error("No organization found");
 
@@ -508,7 +615,9 @@ export default function CreateSOPModal({
               context_links: [],
               regulation_text: "",
               sop_title: state.sopTitle,
+              sop_category: state.sopCategory,
               knowledge_context: knowledgeContext,
+              is_day_in_life: isDayInLifeRef.current,
             },
           },
         },
@@ -589,12 +698,13 @@ export default function CreateSOPModal({
 
       if (sopError) throw sopError;
 
-      // 2. Insert all steps
+      // 2. Insert all steps (map resources → links jsonb column)
       const stepRows = state.generatedSteps.map((s) => ({
         sop_id: sop.id,
         step_number: s.step_number,
         title: s.title,
         description: s.description,
+        links: s.resources && s.resources.length > 0 ? s.resources : null,
       }));
 
       if (stepRows.length > 0) {
@@ -637,9 +747,18 @@ export default function CreateSOPModal({
 
   const progressPercent = (currentStep / TOTAL_STEPS) * 100;
 
+  const guidedComplete =
+    state.buildMode === "guided" &&
+    state.guidedQuestions.length > 0 &&
+    state.guidedCurrentIndex >= state.guidedQuestions.length;
+
   const continueDisabled =
     (currentStep === 1 && !state.sopTitle) ||
-    (currentStep === 2 && !state.buildMode);
+    (currentStep === 2 && !state.buildMode) ||
+    (currentStep === 3 && state.buildMode === "guided" && !guidedComplete);
+
+  // Button label for step 3 (Capture) — "Build My SOP" instead of "Continue"
+  const continueLabel = currentStep === 3 ? "Build My SOP" : "Continue";
 
   return (
     <div
@@ -648,22 +767,22 @@ export default function CreateSOPModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex max-h-[92vh] w-full max-w-[700px] flex-col rounded bg-card shadow-lg mx-4">
+      <div className="flex max-h-[92vh] w-full max-w-[650px] flex-col rounded-[16px] bg-card shadow-lg mx-4">
         {/* ── Header ──────────────────────────────────────────────────── */}
-        <header className="sticky top-0 z-10 rounded-t bg-card border-b border-card-border px-6 pt-5 pb-4">
+        <header className="sticky top-0 z-10 rounded-t-[16px] bg-card border-b border-[#e0e0e0] px-6 pt-5 pb-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-500 text-text-muted tracking-wide uppercase">
+              <p className="text-[12px] font-700 text-text-muted tracking-wide uppercase">
                 Step {currentStep} of {TOTAL_STEPS}
               </p>
-              <h2 className="mt-1 font-display text-lg font-600 text-text">
+              <h2 className="mt-1 text-[22px] font-900 text-text">
                 {state.sopTitle || "New SOP"}
               </h2>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center rounded-sm text-text-muted transition-colors hover:bg-card-border hover:text-text"
+              className="flex h-8 w-8 items-center justify-center rounded-[8px] text-text-muted transition-colors hover:bg-[#f0f0f0] hover:text-text"
               aria-label="Close modal"
             >
               <svg
@@ -682,7 +801,7 @@ export default function CreateSOPModal({
           </div>
 
           {/* Progress bar */}
-          <div className="mt-3 h-1.5 w-full rounded-full bg-card-border overflow-hidden">
+          <div className="mt-3 h-1.5 w-full rounded-full bg-[#e0e0e0] overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-300"
               style={{
@@ -693,7 +812,7 @@ export default function CreateSOPModal({
           </div>
 
           {/* Dot indicators */}
-          <div className="mt-3 flex items-center justify-center gap-3">
+          <div className="mt-3 flex items-center justify-center gap-4">
             {STEP_LABELS.map((label, i) => {
               const step = i + 1;
               const isActive = step === currentStep;
@@ -712,16 +831,16 @@ export default function CreateSOPModal({
                   aria-label={`${label} — step ${step}`}
                 >
                   <span
-                    className={`block h-2.5 w-2.5 rounded-full border-2 transition-colors ${
+                    className={`block h-3 w-3 rounded-full border-2 transition-colors ${
                       isActive
                         ? "border-primary bg-primary"
                         : isCompleted
                           ? "border-accent bg-accent"
-                          : "border-card-border bg-card"
+                          : "border-[#e0e0e0] bg-card"
                     }`}
                   />
                   <span
-                    className={`text-[10px] font-500 leading-none transition-colors ${
+                    className={`text-[11px] font-700 leading-none transition-colors ${
                       isActive
                         ? "text-primary"
                         : isCompleted
@@ -739,29 +858,29 @@ export default function CreateSOPModal({
 
         {/* ── Body (scrollable) ───────────────────────────────────────── */}
         <main className="flex-1 overflow-y-auto px-6 py-8">
-          <h3 className="font-display text-xl font-600 text-text">
+          <h3 className="text-[22px] font-800 text-text">
             {STEP_LABELS[stepIndex]}
           </h3>
-          <p className="mt-1 text-sm text-text-muted">
+          <p className="mt-1 text-[15px] text-text-muted">
             {STEP_SUBTITLES[stepIndex]}
           </p>
 
           {/* ── Step content ─────────────────────────────────────── */}
           {currentStep === 1 ? (
-            /* ── Step 1: Choose Your SOP ──────────────────────────── */
+            /* ── Step 1: Pick a Procedure ─────────────────────────── */
             <div className="mt-6">
               {state.recommendationsLoading ? (
                 <div className="py-10 text-center">
-                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-card-border border-t-primary" />
-                  <p className="mt-4 text-sm font-500 text-text">
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-[#e0e0e0] border-t-primary" />
+                  <p className="mt-4 text-[15px] font-600 text-text">
                     Generating recommendations for your business...
                   </p>
-                  <p className="mt-1 text-xs text-text-muted">
+                  <p className="mt-1 text-[13px] text-text-muted">
                     This may take a few seconds.
                   </p>
                 </div>
               ) : recsError ? (
-                <div className="rounded-sm bg-warn-light px-4 py-3 text-sm text-warn">
+                <div className="rounded-[10px] border-2 border-[#fecaca] bg-[#fef2f2] px-5 py-4 text-[14px] text-warn">
                   <p>{recsError}</p>
                   <button
                     type="button"
@@ -769,7 +888,7 @@ export default function CreateSOPModal({
                       hasLoadedRecsRef.current = false;
                       loadRecommendations();
                     }}
-                    className="mt-2 text-sm font-500 text-primary hover:text-primary-hover"
+                    className="mt-2 text-[14px] font-700 text-primary hover:underline"
                   >
                     Retry
                   </button>
@@ -778,26 +897,28 @@ export default function CreateSOPModal({
                 <>
                   {/* Recommendations list */}
                   {state.recommendations.length > 0 && (
-                    <div className="max-h-[340px] space-y-2 overflow-y-auto pr-1">
+                    <div className="max-h-[340px] space-y-2.5 overflow-y-auto pr-1">
                       {state.recommendations.map((rec) => (
                         <button
                           key={rec.id}
                           type="button"
                           onClick={() => handleSelectRecommendation(rec)}
-                          className="flex w-full items-start gap-4 rounded border border-card-border bg-card p-4 text-left shadow-sm transition-all hover:border-primary hover:shadow"
+                          className="flex w-full items-start gap-4 rounded-[12px] border-2 border-[#e0e0e0] bg-white p-5 text-left transition-all hover:border-primary hover:bg-primary-light"
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
-                              <h4 className="text-sm font-500 text-text">{rec.title}</h4>
-                              <span className="shrink-0 rounded-xs bg-purple-light px-2 py-0.5 text-[11px] font-500 text-purple">
+                              <h4 className="text-[15px] font-700 text-text">
+                                {CATEGORY_EMOJI[rec.category] ?? "📌"} {rec.title}
+                              </h4>
+                              <span className="shrink-0 rounded-full bg-purple-light px-2.5 py-0.5 text-[11px] font-700 text-purple">
                                 {rec.category}
                               </span>
                             </div>
-                            <p className="mt-1 text-xs text-text-muted line-clamp-2">
+                            <p className="mt-1 text-[13px] text-text-muted line-clamp-2">
                               {rec.description}
                             </p>
                           </div>
-                          <span className="mt-1 shrink-0 text-xs font-500 text-primary">
+                          <span className="mt-1 shrink-0 text-[14px] font-700 text-primary">
                             Select &rarr;
                           </span>
                         </button>
@@ -808,10 +929,10 @@ export default function CreateSOPModal({
                   {/* Divider */}
                   <div className="relative my-6">
                     <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-card-border" />
+                      <div className="w-full border-t-2 border-[#e0e0e0]" />
                     </div>
                     <div className="relative flex justify-center">
-                      <span className="bg-card px-3 text-xs text-text-muted">
+                      <span className="bg-card px-4 text-[13px] font-600 text-text-muted">
                         Or write your own
                       </span>
                     </div>
@@ -824,12 +945,12 @@ export default function CreateSOPModal({
                       value={customTitle}
                       onChange={(e) => setCustomTitle(e.target.value)}
                       placeholder="SOP Title (required)"
-                      className="w-full rounded-sm border border-card-border bg-card px-3 py-2.5 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                      className="w-full rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-3 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                     />
                     <select
                       value={customCategory}
                       onChange={(e) => setCustomCategory(e.target.value)}
-                      className="w-full rounded-sm border border-card-border bg-card px-3 py-2.5 text-sm text-text outline-none focus:border-primary"
+                      className="w-full rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-3 text-[15px] text-text outline-none focus:border-primary"
                     >
                       {CATEGORY_OPTIONS.map((cat) => (
                         <option key={cat} value={cat}>{cat}</option>
@@ -840,13 +961,13 @@ export default function CreateSOPModal({
                       onChange={(e) => setCustomDescription(e.target.value)}
                       rows={2}
                       placeholder="Brief description (optional)"
-                      className="w-full resize-y rounded-sm border border-card-border bg-card px-3 py-2.5 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                      className="w-full resize-y rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-3 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                     />
                     <button
                       type="button"
                       onClick={handleCustomContinue}
                       disabled={!customTitle.trim()}
-                      className="rounded-sm bg-primary px-5 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+                      className="rounded-[8px] bg-primary px-6 py-3 text-[15px] font-700 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
                     >
                       Continue &rarr;
                     </button>
@@ -855,13 +976,13 @@ export default function CreateSOPModal({
               )}
             </div>
           ) : currentStep === 2 ? (
-            /* ── Step 2: Build Mode ──────────────────────────────── */
+            /* ── Step 2: How Do You Want to Build It? ─────────────── */
             <div className="mt-6 space-y-4">
               {/* Helper callout */}
-              <div className="flex gap-3 rounded-sm border border-primary/20 bg-primary-light px-4 py-3">
+              <div className="flex gap-3 rounded-[12px] border-2 border-[#b6d4fe] bg-primary-light px-5 py-4">
                 <span className="text-lg leading-none" aria-hidden="true">💡</span>
-                <p className="text-sm text-text-muted">
-                  The build mode determines how we'll capture your process. You can always switch modes later.
+                <p className="text-[14px] text-text leading-relaxed">
+                  Choose how you'd like to describe your process. You can always switch later.
                 </p>
               </div>
 
@@ -869,13 +990,12 @@ export default function CreateSOPModal({
               <button
                 type="button"
                 onClick={() => dispatch({ type: "SET_BUILD_MODE", mode: "guided" })}
-                className={`flex w-full items-start gap-4 rounded-sm border px-5 py-4 text-left transition-colors ${
+                className={`flex w-full items-start gap-4 rounded-[12px] border-2 p-5 text-left transition-colors ${
                   state.buildMode === "guided"
                     ? "border-primary bg-primary-light"
-                    : "border-card-border bg-card hover:border-primary hover:bg-primary-light"
+                    : "border-[#e0e0e0] bg-white hover:border-primary hover:bg-primary-light"
                 }`}
               >
-                {/* Radio dot */}
                 <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-primary">
                   {state.buildMode === "guided" && (
                     <span className="block h-2.5 w-2.5 rounded-full bg-primary" />
@@ -883,13 +1003,13 @@ export default function CreateSOPModal({
                 </span>
                 <div>
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-600 text-text">Guided</span>
-                    <span className="rounded-xs bg-accent-light px-2 py-0.5 text-[11px] font-600 text-accent">
+                    <span className="text-[15px] font-700 text-text">Guided</span>
+                    <span className="rounded-full bg-accent-light px-2.5 py-0.5 text-[11px] font-700 text-accent">
                       Recommended
                     </span>
                   </div>
-                  <p className="mt-1 text-sm text-text-muted">
-                    We'll ask smart questions one at a time to uncover every step of your process — with suggestions to make it easy.
+                  <p className="mt-1 text-[14px] text-text-muted">
+                    We'll ask smart questions one at a time to uncover every step of your process.
                   </p>
                 </div>
               </button>
@@ -898,66 +1018,70 @@ export default function CreateSOPModal({
               <button
                 type="button"
                 onClick={() => dispatch({ type: "SET_BUILD_MODE", mode: "talk" })}
-                className={`flex w-full items-start gap-4 rounded-sm border px-5 py-4 text-left transition-colors ${
+                className={`flex w-full items-start gap-4 rounded-[12px] border-2 p-5 text-left transition-colors ${
                   state.buildMode === "talk"
                     ? "border-primary bg-primary-light"
-                    : "border-card-border bg-card hover:border-primary hover:bg-primary-light"
+                    : "border-[#e0e0e0] bg-white hover:border-primary hover:bg-primary-light"
                 }`}
               >
-                {/* Radio dot */}
                 <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-primary">
                   {state.buildMode === "talk" && (
                     <span className="block h-2.5 w-2.5 rounded-full bg-primary" />
                   )}
                 </span>
                 <div>
-                  <span className="text-sm font-600 text-text">Talk It Out</span>
-                  <p className="mt-1 text-sm text-text-muted">
+                  <span className="text-[15px] font-700 text-text">Talk It Out</span>
+                  <p className="mt-1 text-[14px] text-text-muted">
                     Explain your process naturally — record yourself or type it out. We'll organize it into steps.
                   </p>
                 </div>
               </button>
             </div>
-          ) : currentStep === 4 && state.buildMode === "talk" ? (
-            /* ── Step 4: Talk It Out ─────────────────────────────── */
+          ) : currentStep === 3 && state.buildMode === "talk" ? (
+            /* ── Step 3: Talk It Out (Capture) ────────────────────── */
             <div className="mt-6 space-y-6">
-              {/* Mode badge */}
-              <div className="flex justify-center">
-                <span className="rounded-full bg-purple-light px-3 py-1 text-[11px] font-600 uppercase tracking-wide text-purple">
-                  Talk It Out Mode
-                </span>
-              </div>
-
               {/* Mic record area */}
-              <div className="flex flex-col items-center gap-3">
+              <div className="flex flex-col items-center gap-3 py-2">
                 {isSupported ? (
                   <>
                     <button
                       type="button"
                       onClick={toggleRecording}
-                      className={`flex h-[72px] w-[72px] items-center justify-center rounded-full border-2 text-2xl transition-colors ${
+                      className={`flex h-[72px] w-[72px] items-center justify-center rounded-full border-3 text-[28px] transition-colors ${
                         isRecording
-                          ? "border-warn bg-warn pulse-record"
-                          : "border-warn bg-warn-light hover:bg-warn/10"
+                          ? "border-[#ef4444] bg-[#ef4444] pulse-record text-white"
+                          : "border-[#ef4444] bg-[#fef2f2] hover:bg-[#fecaca]"
                       }`}
                       aria-label={isRecording ? "Stop recording" : "Start recording"}
                     >
                       🎙️
                     </button>
-                    <p className="text-sm font-500 text-text-muted">
+                    <p className="text-[14px] font-600 text-text-muted">
                       {isRecording
-                        ? `Stop Recording (${formatDuration(duration)})`
-                        : "Start Recording"}
+                        ? `Recording... ${formatDuration(duration)}`
+                        : "Tap to record yourself explaining it"}
                     </p>
                   </>
                 ) : (
-                  <p className="text-sm text-text-muted">
+                  <p className="text-[14px] text-text-muted">
                     Voice input not supported in this browser. Type your process below.
                   </p>
                 )}
               </div>
 
-              {/* Textarea + Clear */}
+              {/* Divider */}
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t-2 border-[#e0e0e0]" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-card px-4 text-[13px] font-600 text-text-muted">
+                    — or type it out —
+                  </span>
+                </div>
+              </div>
+
+              {/* Textarea */}
               <div>
                 <textarea
                   value={state.transcript}
@@ -965,8 +1089,8 @@ export default function CreateSOPModal({
                     dispatch({ type: "SET_TRANSCRIPT", transcript: e.target.value })
                   }
                   rows={6}
-                  className="w-full min-h-[120px] resize-y rounded-sm border border-card-border bg-card px-3 py-2.5 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                  placeholder="Type your process here… or use the record button above."
+                  className="w-full min-h-[160px] resize-y rounded-[12px] border-2 border-[#e0e0e0] bg-white px-4 py-4 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                  placeholder="Example: First I unlock the medication cabinet. I check the MAR for whats due..."
                 />
                 {state.transcript && (
                   <div className="mt-2 flex justify-end">
@@ -975,7 +1099,7 @@ export default function CreateSOPModal({
                       onClick={() =>
                         dispatch({ type: "SET_TRANSCRIPT", transcript: "" })
                       }
-                      className="text-sm text-text-muted transition-colors hover:text-warn"
+                      className="text-[13px] font-600 text-text-muted transition-colors hover:text-warn"
                     >
                       Clear
                     </button>
@@ -983,43 +1107,191 @@ export default function CreateSOPModal({
                 )}
               </div>
 
-              {/* Prompt hints */}
-              <div className="rounded-sm border-l-[3px] border-primary bg-primary-light px-4 py-3">
-                <p className="text-xs font-600 uppercase tracking-wide text-primary">
-                  Try starting with…
+              {/* Tip box */}
+              <div className="rounded-[12px] border-2 border-[#b6d4fe] bg-primary-light px-5 py-4">
+                <p className="text-[14px] text-text leading-relaxed">
+                  💡 <strong>Tip:</strong> Pretend you're showing someone new how to do this on their first day.
                 </p>
-                <ul className="mt-2 space-y-1 text-sm italic text-text-muted">
-                  <li>"First thing I do is…"</li>
-                  <li>"If they don't have their documents…"</li>
-                  <li>"Before they can start working I need to…"</li>
-                  <li>"The background check process is…"</li>
-                </ul>
               </div>
             </div>
-          ) : currentStep === 4 && state.buildMode === "guided" ? (
-            /* ── Step 4: Guided placeholder ──────────────────────── */
-            <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
-              <p className="text-sm text-text-light">
-                Guided mode coming soon.
-              </p>
+          ) : currentStep === 3 && state.buildMode === "guided" ? (
+            /* ── Step 3: Guided Interview ──────────────────────────── */
+            <div className="mt-6">
+              {state.guidedLoading ? (
+                /* Loading */
+                <div className="py-10 text-center">
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-[#e0e0e0] border-t-primary" />
+                  <p className="mt-4 text-[15px] font-600 text-text">
+                    Preparing your questions...
+                  </p>
+                  <p className="mt-1 text-[13px] text-text-muted">
+                    This will just take a moment.
+                  </p>
+                </div>
+              ) : state.guidedError ? (
+                /* Error */
+                <div className="rounded-[10px] border-2 border-[#fecaca] bg-[#fef2f2] px-5 py-4 text-[14px] text-warn">
+                  <p>{state.guidedError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      hasLoadedGuidedRef.current = false;
+                      loadGuidedQuestions();
+                    }}
+                    className="mt-2 text-[14px] font-700 text-primary hover:underline"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              ) : state.guidedQuestions.length > 0 && state.guidedCurrentIndex < state.guidedQuestions.length ? (
+                /* Question UI */
+                (() => {
+                  const q = state.guidedQuestions[state.guidedCurrentIndex];
+                  return (
+                    <div>
+                      {/* Progress */}
+                      <p className="text-[13px] font-600 text-text-muted">
+                        Question {state.guidedCurrentIndex + 1} of {state.guidedQuestions.length}
+                      </p>
+
+                      {/* Question */}
+                      <h4 className="mt-3 text-[18px] font-700 text-text leading-snug">
+                        {q.question}
+                      </h4>
+
+                      {/* Answer cards */}
+                      <div className="mt-5 space-y-2.5">
+                        {q.answers.map((ans, ai) => (
+                          <button
+                            key={ai}
+                            type="button"
+                            onClick={() =>
+                              dispatch({
+                                type: "SET_GUIDED_ANSWER",
+                                questionId: q.id,
+                                question: q.question,
+                                answer: ans,
+                              })
+                            }
+                            className="flex w-full items-center gap-3 rounded-[12px] border-2 border-[#e0e0e0] bg-white p-4 text-left text-[15px] text-text transition-all hover:border-primary hover:bg-primary-light"
+                          >
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-[#e0e0e0] text-[13px] font-700 text-text-muted">
+                              {String.fromCharCode(65 + ai)}
+                            </span>
+                            <span>{ans}</span>
+                          </button>
+                        ))}
+
+                        {/* "Something else" option */}
+                        {!state.guidedShowOther ? (
+                          <button
+                            type="button"
+                            onClick={() => dispatch({ type: "TOGGLE_GUIDED_OTHER" })}
+                            className="flex w-full items-center gap-3 rounded-[12px] border-2 border-dashed border-[#e0e0e0] bg-white p-4 text-left text-[15px] text-text-muted transition-all hover:border-primary hover:text-text"
+                          >
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 border-dashed border-[#e0e0e0] text-[13px] font-700">
+                              ✏️
+                            </span>
+                            <span>Something else...</span>
+                          </button>
+                        ) : (
+                          <div className="rounded-[12px] border-2 border-primary bg-primary-light p-4">
+                            <textarea
+                              rows={2}
+                              value={state.guidedOtherText}
+                              onChange={(e) =>
+                                dispatch({ type: "SET_GUIDED_OTHER_TEXT", text: e.target.value })
+                              }
+                              className="w-full resize-y rounded-[8px] border-2 border-[#e0e0e0] bg-white px-3 py-2 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                              placeholder="Type your answer..."
+                              autoFocus
+                            />
+                            <div className="mt-2 flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => dispatch({ type: "TOGGLE_GUIDED_OTHER" })}
+                                className="rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-2 text-[13px] font-700 text-text-muted transition-colors hover:text-text"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!state.guidedOtherText.trim()}
+                                onClick={() =>
+                                  dispatch({
+                                    type: "SET_GUIDED_ANSWER",
+                                    questionId: q.id,
+                                    question: q.question,
+                                    answer: state.guidedOtherText.trim(),
+                                  })
+                                }
+                                className="rounded-[8px] bg-primary px-4 py-2 text-[13px] font-700 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+                              >
+                                Submit
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Progress dots */}
+                      <div className="mt-6 flex justify-center gap-2">
+                        {state.guidedQuestions.map((_, di) => (
+                          <div
+                            key={di}
+                            className={`h-2.5 w-2.5 rounded-full ${
+                              di < state.guidedCurrentIndex
+                                ? "bg-primary"
+                                : di === state.guidedCurrentIndex
+                                  ? "bg-primary/40"
+                                  : "border-2 border-[#e0e0e0] bg-white"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : guidedComplete ? (
+                /* Completed — show summary */
+                <div>
+                  <div className="flex items-center gap-2 text-[16px] font-700 text-text">
+                    <span>✅</span> All done! Here's what you told us:
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {state.guidedAnswers.map((a, ai) => (
+                      <div
+                        key={ai}
+                        className="rounded-[10px] border-2 border-[#e0e0e0] bg-white px-4 py-3"
+                      >
+                        <p className="text-[13px] font-700 text-text-muted">
+                          Q{ai + 1}: {a.question}
+                        </p>
+                        <p className="mt-1 text-[15px] text-text">{a.answer}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-4 text-[14px] text-text-muted text-center">
+                    Click <strong>Build My SOP</strong> below to generate your steps.
+                  </p>
+                </div>
+              ) : null}
             </div>
-          ) : currentStep === 5 ? (
-            /* ── Step 5: Review Draft ────────────────────────────── */
+          ) : currentStep === 4 ? (
+            /* ── Step 4: Review Your Steps ────────────────────────── */
             <div className="mt-6">
               {generating ? (
-                /* Loading spinner */
                 <div className="py-10 text-center">
-                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-card-border border-t-primary" />
-                  <p className="mt-4 text-sm font-500 text-text">
-                    Generating SOP steps...
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-[#e0e0e0] border-t-primary" />
+                  <p className="mt-4 text-[15px] font-600 text-text">
+                    Building your SOP steps...
                   </p>
-                  <p className="mt-1 text-xs text-text-muted">
+                  <p className="mt-1 text-[13px] text-text-muted">
                     This may take a few seconds.
                   </p>
                 </div>
               ) : genError ? (
-                /* Error state */
-                <div className="rounded-sm bg-warn-light px-4 py-3 text-sm text-warn">
+                <div className="rounded-[10px] border-2 border-[#fecaca] bg-[#fef2f2] px-5 py-4 text-[14px] text-warn">
                   <p>{genError}</p>
                   <button
                     type="button"
@@ -1027,21 +1299,20 @@ export default function CreateSOPModal({
                       hasGeneratedRef.current = false;
                       handleGenerate();
                     }}
-                    className="mt-2 text-sm font-500 text-primary hover:text-primary-hover"
+                    className="mt-2 text-[14px] font-700 text-primary hover:underline"
                   >
                     Retry
                   </button>
                 </div>
               ) : (
-                /* Steps list */
                 <div className="space-y-3">
                   {state.generatedSteps.map((step, i) => (
                     <div
                       key={step.step_number}
-                      className="flex gap-4 rounded border border-card-border bg-card p-4 shadow-sm"
+                      className="flex gap-4 rounded-[12px] border-2 border-[#e0e0e0] bg-white p-5"
                     >
                       {/* Step number badge */}
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-600 text-white">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-[14px] font-800 text-white">
                         {i + 1}
                       </div>
 
@@ -1053,21 +1324,21 @@ export default function CreateSOPModal({
                               type="text"
                               value={editTitle}
                               onChange={(e) => setEditTitle(e.target.value)}
-                              className="w-full rounded-sm border border-card-border bg-card px-3 py-2 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                              className="w-full rounded-[8px] border-2 border-[#e0e0e0] bg-white px-3 py-2 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                               placeholder="Step title"
                             />
                             <textarea
                               rows={3}
                               value={editDescription}
                               onChange={(e) => setEditDescription(e.target.value)}
-                              className="w-full resize-y rounded-sm border border-card-border bg-card px-3 py-2 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                              className="w-full resize-y rounded-[8px] border-2 border-[#e0e0e0] bg-white px-3 py-2 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                               placeholder="Step description"
                             />
                             <div className="flex gap-2">
                               <button
                                 type="button"
                                 onClick={() => setEditingIndex(null)}
-                                className="rounded-sm border border-card-border bg-card px-3 py-1.5 text-xs font-500 text-text-muted transition-colors hover:text-text"
+                                className="rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-2 text-[13px] font-700 text-text-muted transition-colors hover:text-text"
                               >
                                 Cancel
                               </button>
@@ -1083,7 +1354,7 @@ export default function CreateSOPModal({
                                   });
                                   setEditingIndex(null);
                                 }}
-                                className="rounded-sm bg-primary px-3 py-1.5 text-xs font-600 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+                                className="rounded-[8px] bg-primary px-4 py-2 text-[13px] font-700 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
                               >
                                 Save
                               </button>
@@ -1091,13 +1362,47 @@ export default function CreateSOPModal({
                           </div>
                         ) : (
                           <>
-                            <p className="text-sm font-500 text-text">
+                            <p className="text-[15px] font-600 text-text">
                               {step.title}
                             </p>
-                            {step.description && (
-                              <p className="mt-1 text-sm text-text-muted whitespace-pre-wrap">
-                                {step.description}
-                              </p>
+                            {step.description && (() => {
+                              const lines = step.description.split("\n").filter((l) => l.trim());
+                              const hasBullets = lines.some((l) => l.trim().startsWith("•"));
+                              if (hasBullets) {
+                                return (
+                                  <ul className="mt-1.5 space-y-1">
+                                    {lines.map((line, li) => (
+                                      <li key={li} className="flex gap-2 text-[14px] text-text-muted">
+                                        <span className="shrink-0 text-primary">•</span>
+                                        <span>{line.replace(/^•\s*/, "")}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                );
+                              }
+                              return (
+                                <p className="mt-1 text-[14px] text-text-muted whitespace-pre-wrap">
+                                  {step.description}
+                                </p>
+                              );
+                            })()}
+                            {/* Resources from AI */}
+                            {step.resources && step.resources.length > 0 && (
+                              <div className="mt-2 border-t border-[#e0e0e0] pt-2">
+                                <p className="text-[11px] font-700 text-text-muted uppercase tracking-wide">🔗 Links & Resources</p>
+                                <ul className="mt-1 space-y-0.5">
+                                  {step.resources.map((r, ri) => (
+                                    <li key={ri} className="flex items-center gap-2 text-[12px]">
+                                      <span>{r.type === "form" ? "📄" : r.type === "doc" ? "📋" : "🔗"}</span>
+                                      {r.url ? (
+                                        <a href={r.url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{r.label}</a>
+                                      ) : (
+                                        <span className="text-text-muted">{r.label}</span>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
                             )}
                           </>
                         )}
@@ -1112,7 +1417,7 @@ export default function CreateSOPModal({
                               onClick={() =>
                                 dispatch({ type: "REORDER_STEP", index: i, direction: "up" })
                               }
-                              className="rounded px-1.5 py-1 text-xs text-text-muted transition-colors hover:text-text"
+                              className="rounded px-1.5 py-1 text-[13px] font-600 text-text-muted transition-colors hover:text-text"
                               title="Move up"
                             >
                               ↑
@@ -1124,7 +1429,7 @@ export default function CreateSOPModal({
                               onClick={() =>
                                 dispatch({ type: "REORDER_STEP", index: i, direction: "down" })
                               }
-                              className="rounded px-1.5 py-1 text-xs text-text-muted transition-colors hover:text-text"
+                              className="rounded px-1.5 py-1 text-[13px] font-600 text-text-muted transition-colors hover:text-text"
                               title="Move down"
                             >
                               ↓
@@ -1137,14 +1442,14 @@ export default function CreateSOPModal({
                               setEditTitle(step.title);
                               setEditDescription(step.description);
                             }}
-                            className="rounded px-1.5 py-1 text-xs text-text-muted transition-colors hover:text-text"
+                            className="rounded px-1.5 py-1 text-[13px] font-600 text-text-muted transition-colors hover:text-text"
                           >
                             Edit
                           </button>
                           <button
                             type="button"
                             onClick={() => dispatch({ type: "DELETE_STEP", index: i })}
-                            className="rounded px-1.5 py-1 text-xs text-warn transition-colors hover:text-warn"
+                            className="rounded px-1.5 py-1 text-[13px] font-600 text-warn transition-colors hover:text-warn"
                           >
                             Delete
                           </button>
@@ -1155,20 +1460,20 @@ export default function CreateSOPModal({
 
                   {/* Add step form */}
                   {addingStep ? (
-                    <div className="rounded border border-card-border bg-card p-4 shadow-sm">
+                    <div className="rounded-[12px] border-2 border-[#e0e0e0] bg-white p-5">
                       <div className="space-y-3">
                         <input
                           type="text"
                           value={addTitle}
                           onChange={(e) => setAddTitle(e.target.value)}
-                          className="w-full rounded-sm border border-card-border bg-card px-3 py-2 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                          className="w-full rounded-[8px] border-2 border-[#e0e0e0] bg-white px-3 py-2 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                           placeholder="Step title"
                         />
                         <textarea
                           rows={3}
                           value={addDescription}
                           onChange={(e) => setAddDescription(e.target.value)}
-                          className="w-full resize-y rounded-sm border border-card-border bg-card px-3 py-2 text-sm text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                          className="w-full resize-y rounded-[8px] border-2 border-[#e0e0e0] bg-white px-3 py-2 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
                           placeholder="Step description"
                         />
                         <div className="flex gap-2">
@@ -1179,7 +1484,7 @@ export default function CreateSOPModal({
                               setAddTitle("");
                               setAddDescription("");
                             }}
-                            className="rounded-sm border border-card-border bg-card px-3 py-1.5 text-xs font-500 text-text-muted transition-colors hover:text-text"
+                            className="rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-2 text-[13px] font-700 text-text-muted transition-colors hover:text-text"
                           >
                             Cancel
                           </button>
@@ -1196,7 +1501,7 @@ export default function CreateSOPModal({
                               setAddDescription("");
                               setAddingStep(false);
                             }}
-                            className="rounded-sm bg-primary px-3 py-1.5 text-xs font-600 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+                            className="rounded-[8px] bg-primary px-4 py-2 text-[13px] font-700 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
                           >
                             Save Step
                           </button>
@@ -1207,7 +1512,7 @@ export default function CreateSOPModal({
                     <button
                       type="button"
                       onClick={() => setAddingStep(true)}
-                      className="w-full rounded-sm border border-dashed border-card-border px-4 py-2.5 text-sm font-500 text-text-muted transition-colors hover:border-primary hover:text-primary"
+                      className="w-full rounded-[12px] border-2 border-dashed border-[#e0e0e0] px-5 py-3 text-[14px] font-600 text-text-muted transition-colors hover:border-primary hover:text-primary"
                     >
                       + Add Step
                     </button>
@@ -1215,23 +1520,21 @@ export default function CreateSOPModal({
                 </div>
               )}
             </div>
-          ) : currentStep === 6 ? (
-            /* ── Step 6: Compliance Audit + Finalize ──────────────── */
+          ) : currentStep === 5 ? (
+            /* ── Step 5: Compliance Check ─────────────────────────── */
             <div className="mt-6">
               {complianceLoading ? (
-                /* Loading spinner */
                 <div className="py-10 text-center">
-                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-card-border border-t-primary" />
-                  <p className="mt-4 text-sm font-500 text-text">
-                    Running compliance audit...
+                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-[#e0e0e0] border-t-primary" />
+                  <p className="mt-4 text-[15px] font-600 text-text">
+                    Running compliance check...
                   </p>
-                  <p className="mt-1 text-xs text-text-muted">
+                  <p className="mt-1 text-[13px] text-text-muted">
                     This may take a few seconds.
                   </p>
                 </div>
               ) : complianceError ? (
-                /* Error state */
-                <div className="rounded-sm bg-warn-light px-4 py-3 text-sm text-warn">
+                <div className="rounded-[10px] border-2 border-[#fecaca] bg-[#fef2f2] px-5 py-4 text-[14px] text-warn">
                   <p>{complianceError}</p>
                   <button
                     type="button"
@@ -1239,58 +1542,54 @@ export default function CreateSOPModal({
                       hasCheckedComplianceRef.current = false;
                       runComplianceCheck();
                     }}
-                    className="mt-2 text-sm font-500 text-primary hover:text-primary-hover"
+                    className="mt-2 text-[14px] font-700 text-primary hover:underline"
                   >
                     Retry
                   </button>
                 </div>
               ) : (
-                /* Results */
                 <div className="space-y-6">
-                  {/* ── Score Ring ─────────────────────────────────── */}
+                  {/* Score Ring */}
                   {state.complianceScore !== null && (
-                    <div className="flex items-center gap-5">
-                      <svg width="68" height="68" viewBox="0 0 68 68" className="shrink-0">
-                        {/* Background track */}
+                    <div className="flex items-center gap-5 rounded-[12px] border-2 border-[#e0e0e0] bg-white p-5">
+                      <svg width="80" height="80" viewBox="0 0 80 80" className="shrink-0">
                         <circle
-                          cx="34"
-                          cy="34"
-                          r="31"
+                          cx="40"
+                          cy="40"
+                          r="36"
                           fill="none"
-                          stroke="var(--color-card-border)"
+                          stroke="#e0e0e0"
                           strokeWidth="6"
                         />
-                        {/* Filled arc */}
                         <circle
-                          cx="34"
-                          cy="34"
-                          r="31"
+                          cx="40"
+                          cy="40"
+                          r="36"
                           fill="none"
                           stroke="var(--color-primary)"
                           strokeWidth="6"
                           strokeLinecap="round"
-                          strokeDasharray={`${2 * Math.PI * 31}`}
-                          strokeDashoffset={`${2 * Math.PI * 31 * (1 - state.complianceScore / 100)}`}
-                          transform="rotate(-90 34 34)"
+                          strokeDasharray={`${2 * Math.PI * 36}`}
+                          strokeDashoffset={`${2 * Math.PI * 36 * (1 - state.complianceScore / 100)}`}
+                          transform="rotate(-90 40 40)"
                         />
-                        {/* Score text */}
                         <text
-                          x="34"
-                          y="34"
+                          x="40"
+                          y="40"
                           textAnchor="middle"
                           dominantBaseline="central"
-                          className="font-display font-700"
+                          className="font-800"
                           fill="var(--color-text)"
-                          fontSize="18"
+                          fontSize="22"
                         >
                           {state.complianceScore}
                         </text>
                       </svg>
                       <div>
-                        <p className="text-sm font-600 text-text">
-                          Compliance Score: {state.complianceScore} / 100
+                        <p className="text-[16px] font-800 text-text">
+                          Compliance Score: {state.complianceScore}/100
                         </p>
-                        <p className="mt-0.5 text-sm text-text-muted">
+                        <p className="mt-0.5 text-[14px] text-text-muted">
                           {state.complianceScore >= 90
                             ? "Looking good!"
                             : state.complianceScore >= 70
@@ -1301,7 +1600,7 @@ export default function CreateSOPModal({
                     </div>
                   )}
 
-                  {/* ── Findings cards ────────────────────────────── */}
+                  {/* Findings cards */}
                   {state.complianceFindings.length > 0 && (
                     <div className="space-y-3">
                       {state.complianceFindings.map((f) => {
@@ -1309,14 +1608,13 @@ export default function CreateSOPModal({
                         return (
                           <div
                             key={f.finding_id}
-                            className={`rounded border border-card-border bg-card p-4 shadow-sm transition-opacity ${
+                            className={`rounded-[12px] border-2 border-[#fecaca] bg-[#fef2f2] p-5 transition-opacity ${
                               isResolved ? "opacity-50" : ""
                             }`}
                           >
                             <div className="flex items-start gap-3">
-                              {/* Severity badge */}
                               <span
-                                className={`mt-0.5 shrink-0 rounded-xs px-2 py-0.5 text-[11px] font-600 uppercase ${
+                                className={`mt-0.5 shrink-0 rounded-[4px] px-2.5 py-1 text-[11px] font-800 uppercase ${
                                   f.severity === "high"
                                     ? "bg-warn-light text-warn"
                                     : f.severity === "medium"
@@ -1327,36 +1625,35 @@ export default function CreateSOPModal({
                                 {f.severity}
                               </span>
                               <div className="min-w-0 flex-1">
-                                <p className="text-sm font-500 text-text">{f.title}</p>
-                                <p className="mt-1 text-sm text-text-muted">{f.description}</p>
+                                <p className="text-[15px] font-600 text-text">{f.title}</p>
+                                <p className="mt-1 text-[14px] text-text-muted">{f.description}</p>
                                 {f.recommendation && (
-                                  <p className="mt-1 text-xs text-text-light italic">
+                                  <p className="mt-1 text-[13px] text-text-light italic">
                                     {f.recommendation}
                                   </p>
                                 )}
                               </div>
                             </div>
-                            {/* Actions */}
                             {!isResolved && (
                               <div className="mt-3 flex gap-2 pl-8">
                                 <button
                                   type="button"
                                   onClick={() => toggleFinding(f.finding_id)}
-                                  className="rounded-sm bg-accent px-3 py-1.5 text-xs font-600 text-white transition-colors hover:bg-accent-hover"
+                                  className="rounded-[8px] bg-accent px-4 py-2 text-[13px] font-700 text-white transition-colors hover:bg-accent-hover"
                                 >
                                   &#10003; Compliant
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => dispatch({ type: "SET_STEP", step: 5 })}
-                                  className="rounded-sm border border-card-border bg-card px-3 py-1.5 text-xs font-500 text-text-muted transition-colors hover:text-text"
+                                  onClick={() => dispatch({ type: "SET_STEP", step: 4 })}
+                                  className="rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-2 text-[13px] font-700 text-text-muted transition-colors hover:text-text"
                                 >
                                   Update SOP
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => toggleFinding(f.finding_id)}
-                                  className="rounded-sm px-3 py-1.5 text-xs font-500 text-text-light transition-colors hover:text-text-muted"
+                                  className="rounded-[8px] px-4 py-2 text-[13px] font-700 text-text-light transition-colors hover:text-text-muted"
                                 >
                                   Skip
                                 </button>
@@ -1368,17 +1665,17 @@ export default function CreateSOPModal({
                     </div>
                   )}
 
-                  {/* ── Confirmation checkbox row ─────────────────── */}
+                  {/* Confirmation checkbox */}
                   <button
                     type="button"
                     onClick={() => setConfirmed((c) => !c)}
-                    className="flex w-full items-center gap-3 rounded-sm bg-accent-light px-4 py-3 text-left transition-colors hover:bg-accent-light/80"
+                    className="flex w-full items-center gap-3 rounded-[12px] border-2 border-accent/30 bg-accent-light px-5 py-4 text-left transition-colors hover:bg-accent-light/80"
                   >
                     <span
                       className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors ${
                         confirmed
                           ? "border-accent bg-accent text-white"
-                          : "border-card-border bg-card"
+                          : "border-[#e0e0e0] bg-white"
                       }`}
                     >
                       {confirmed && (
@@ -1393,30 +1690,23 @@ export default function CreateSOPModal({
                         </svg>
                       )}
                     </span>
-                    <span className="text-sm text-text">
+                    <span className="text-[14px] font-600 text-text">
                       I confirm this SOP reflects my current facility process and I have reviewed all compliance findings.
                     </span>
                   </button>
                 </div>
               )}
             </div>
-          ) : (
-            /* Placeholder for step 3 (Regulatory Context) */
-            <div className="mt-6 rounded-sm border border-dashed border-card-border p-8 text-center">
-              <p className="text-sm text-text-light">
-                Step {currentStep} content will go here.
-              </p>
-            </div>
-          )}
+          ) : null}
         </main>
 
         {/* ── Footer ──────────────────────────────────────────────────── */}
-        <footer className="flex items-center justify-between border-t border-card-border px-6 py-4">
+        <footer className="flex items-center justify-between border-t border-[#e0e0e0] px-6 py-4">
           {currentStep > 1 ? (
             <button
               type="button"
               onClick={goBack}
-              className="rounded-sm border border-card-border bg-card px-5 py-2 text-sm font-500 text-text-muted transition-colors hover:text-text"
+              className="rounded-[8px] border-2 border-[#e0e0e0] bg-white px-6 py-2.5 text-[14px] font-700 text-text-muted transition-colors hover:text-text"
             >
               Back
             </button>
@@ -1427,28 +1717,37 @@ export default function CreateSOPModal({
           {currentStep < TOTAL_STEPS ? (
             <button
               type="button"
-              onClick={goNext}
+              onClick={() => {
+                // For guided mode: compile Q&A into transcript before advancing
+                if (currentStep === 3 && state.buildMode === "guided" && guidedComplete) {
+                  const transcript = state.guidedAnswers
+                    .map((a) => `Q: ${a.question}\nA: ${a.answer}`)
+                    .join("\n\n");
+                  dispatch({ type: "SET_TRANSCRIPT", transcript });
+                }
+                goNext();
+              }}
               disabled={continueDisabled}
-              className={`rounded-sm bg-primary px-6 py-2 text-sm font-600 text-white transition-colors ${
+              className={`rounded-[8px] bg-primary px-7 py-2.5 text-[15px] font-700 text-white transition-colors ${
                 continueDisabled
                   ? "cursor-not-allowed opacity-50"
                   : "hover:bg-primary-hover"
               }`}
             >
-              Continue
+              {continueLabel}
             </button>
           ) : (
             <button
               type="button"
               onClick={handleFinalize}
               disabled={!confirmed || finalizing}
-              className={`rounded-sm bg-accent px-6 py-2 text-sm font-600 text-white transition-colors ${
+              className={`rounded-[8px] bg-accent px-7 py-2.5 text-[15px] font-700 text-white transition-colors ${
                 !confirmed || finalizing
                   ? "cursor-not-allowed opacity-50"
                   : "hover:bg-accent-hover"
               }`}
             >
-              {finalizing ? "Finalizing..." : "Finalize"}
+              {finalizing ? "Finalizing..." : "Finalize SOP"}
             </button>
           )}
         </footer>

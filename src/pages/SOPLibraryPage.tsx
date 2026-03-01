@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import logger from "../lib/logger";
 import { useCreateSOP } from "../contexts/CreateSOPContext";
+import { useAuth } from "../contexts/AuthContext";
 
 interface SOP {
   id: string;
@@ -13,8 +14,8 @@ interface SOP {
 }
 
 const STATUS_STYLES: Record<string, string> = {
-  draft: "bg-warn-light text-warn",
-  published: "bg-accent-light text-accent",
+  draft: "bg-[#fef3c7] text-[#92400e]",
+  published: "bg-accent-light text-[#166534]",
   archived: "bg-bg text-text-muted",
 };
 
@@ -28,9 +29,11 @@ function formatDate(iso: string): string {
 
 export default function SOPLibraryPage() {
   const { openCreateSOP } = useCreateSOP();
+  const { userProfile } = useAuth();
   const [sops, setSops] = useState<SOP[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [orgName, setOrgName] = useState("");
 
   useEffect(() => {
     async function fetchSOPs() {
@@ -54,18 +57,37 @@ export default function SOPLibraryPage() {
       setLoading(false);
     }
 
+    async function fetchOrgName() {
+      if (!userProfile?.org_id) return;
+      const { data } = await supabase
+        .from("orgs")
+        .select("name")
+        .eq("id", userProfile.org_id)
+        .single();
+      if (data?.name) setOrgName(data.name);
+    }
+
     fetchSOPs();
-  }, []);
+    fetchOrgName();
+  }, [userProfile?.org_id]);
 
   return (
     <div>
+      {/* Back link */}
+      <Link
+        to="/"
+        className="text-[15px] font-700 text-primary hover:underline"
+      >
+        &larr; Back to Home
+      </Link>
+
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-2xl font-600">SOP Library</h1>
+      <div className="mt-4 flex items-center justify-between">
+        <h1 className="text-[28px] font-900">📚 My SOPs</h1>
         <button
           type="button"
           onClick={openCreateSOP}
-          className="rounded-sm bg-primary px-4 py-2 text-sm font-600 text-white transition-colors hover:bg-primary-hover"
+          className="rounded-[8px] bg-primary px-6 py-3 text-[15px] font-700 text-white transition-colors hover:bg-primary-hover"
         >
           + New SOP
         </button>
@@ -73,7 +95,7 @@ export default function SOPLibraryPage() {
 
       {/* Error */}
       {error && (
-        <div className="mt-6 rounded-sm bg-warn-light px-4 py-3 text-sm text-warn">
+        <div className="mt-6 rounded-[8px] bg-warn-light px-4 py-3 text-sm text-warn">
           {error}
         </div>
       )}
@@ -83,47 +105,92 @@ export default function SOPLibraryPage() {
         <p className="mt-10 text-center text-sm text-text-muted">Loading...</p>
       )}
 
-      {/* Empty state */}
+      {/* Empty state — Day in the Life welcome */}
       {!loading && !error && sops.length === 0 && (
-        <div className="mt-16 text-center">
-          <h2 className="font-display text-xl font-600 text-text">No SOPs yet</h2>
-          <p className="mt-2 text-sm text-text-muted">
-            Create your first Standard Operating Procedure to get started.
+        <div className="mx-auto mt-12 max-w-[520px]">
+          <div className="rounded-[16px] border-2 border-[#b6d4fe] bg-primary-light px-8 py-10 text-center">
+            <div className="text-[64px] leading-none">🌅</div>
+            <h2 className="mt-4 text-[24px] font-900 text-text">
+              Welcome to EZSOP!
+            </h2>
+            <p className="mt-3 text-[16px] leading-relaxed text-text-muted">
+              Let's start by documenting a typical day at{" "}
+              <strong className="text-text">{orgName || "your home"}</strong>.
+              We'll walk you through it step by step — just describe what
+              happens from morning to night.
+            </p>
+            <button
+              type="button"
+              onClick={() =>
+                openCreateSOP({
+                  title: "A Day in the Life",
+                  isDayInLife: true,
+                })
+              }
+              className="mt-6 rounded-[8px] bg-primary px-8 py-3.5 text-[16px] font-700 text-white transition-colors hover:bg-primary-hover"
+            >
+              Let's Go! 🚀
+            </button>
+          </div>
+
+          <p className="mt-6 text-center text-[14px] text-text-muted">
+            Or{" "}
+            <button
+              type="button"
+              onClick={() => openCreateSOP()}
+              className="font-700 text-primary hover:underline"
+            >
+              create a different SOP
+            </button>{" "}
+            instead.
           </p>
-          <button
-            type="button"
-            onClick={openCreateSOP}
-            className="mt-6 inline-block rounded-sm bg-primary px-5 py-2.5 text-sm font-600 text-white transition-colors hover:bg-primary-hover"
-          >
-            Create your first SOP
-          </button>
         </div>
       )}
 
-      {/* SOP grid */}
+      {/* SOP row list */}
       {!loading && sops.length > 0 && (
-        <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-6 space-y-3">
           {sops.map((sop) => (
-            <Link
+            <div
               key={sop.id}
-              to={`/sops/${sop.id}`}
-              className="block rounded border border-card-border bg-card p-5 shadow transition-shadow hover:shadow-lg"
+              className="flex items-center gap-4 rounded-[12px] border-2 border-[#e0e0e0] bg-white px-6 py-5 transition-colors hover:border-primary hover:bg-[#fafbff]"
             >
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="font-500 text-text line-clamp-2">{sop.title}</h3>
-                <span
-                  className={`shrink-0 rounded-xs px-2 py-0.5 text-xs font-500 ${STATUS_STYLES[sop.status] ?? STATUS_STYLES.draft}`}
-                >
-                  {sop.status}
-                </span>
+              {/* Title + category */}
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-600 text-text truncate">{sop.title}</p>
+                <p className="mt-0.5 text-[13px] text-text-muted">
+                  {sop.category ?? "Uncategorized"}
+                </p>
               </div>
-              <p className="mt-2 text-sm text-text-muted">
-                {sop.category ?? "Uncategorized"}
-              </p>
-              <p className="mt-3 text-xs text-text-light">
+
+              {/* Updated date */}
+              <p className="shrink-0 text-[13px] text-text-muted">
                 Updated {formatDate(sop.updated_at)}
               </p>
-            </Link>
+
+              {/* Status pill */}
+              <span
+                className={`shrink-0 rounded-full px-3.5 py-1 text-[13px] font-700 ${STATUS_STYLES[sop.status] ?? STATUS_STYLES.draft}`}
+              >
+                {sop.status}
+              </span>
+
+              {/* Action buttons */}
+              <div className="flex shrink-0 gap-2">
+                <Link
+                  to={`/sops/${sop.id}`}
+                  className="rounded-[8px] bg-primary px-4 py-2 text-[13px] font-700 text-white transition-colors hover:bg-primary-hover"
+                >
+                  View &rarr;
+                </Link>
+                <Link
+                  to={`/sops/${sop.id}`}
+                  className="rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-2 text-[13px] font-700 text-text-muted transition-colors hover:border-primary hover:text-primary"
+                >
+                  Edit
+                </Link>
+              </div>
+            </div>
           ))}
         </div>
       )}

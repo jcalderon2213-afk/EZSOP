@@ -28,55 +28,16 @@ interface ReadinessItem {
 interface GroupConfig {
   key: string;
   label: string;
-  icon: JSX.Element;
+  emoji: string;
 }
 
 // ── Group config ───────────────────────────────────────────────────────────
 
 const GROUPS: GroupConfig[] = [
-  {
-    key: "paperwork",
-    label: "Paperwork & Documents",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-        <path d="M14 2v6h6" />
-        <path d="M16 13H8" />
-        <path d="M16 17H8" />
-        <path d="M10 9H8" />
-      </svg>
-    ),
-  },
-  {
-    key: "training",
-    label: "Required Training",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z" />
-        <path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" />
-      </svg>
-    ),
-  },
-  {
-    key: "skills",
-    label: "Skills",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-        <path d="M22 4L12 14.01l-3-3" />
-      </svg>
-    ),
-  },
-  {
-    key: "on_the_job",
-    label: "On-the-Job Readiness",
-    icon: (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-        <circle cx="12" cy="7" r="4" />
-      </svg>
-    ),
-  },
+  { key: "paperwork", label: "Paperwork & Documents", emoji: "📋" },
+  { key: "training", label: "Required Training", emoji: "📖" },
+  { key: "skills", label: "Skills", emoji: "✅" },
+  { key: "on_the_job", label: "On-the-Job Readiness", emoji: "👷" },
 ];
 
 // ── Default seed items ─────────────────────────────────────────────────────
@@ -126,7 +87,7 @@ function progressMessage(pct: number, name: string): string {
 
 function Confetti() {
   const pieces = Array.from({ length: 24 }, (_, i) => {
-    const colors = ["#D4764E", "#4A8B6E", "#5B8DB8", "#7B6BA1", "#C9544A"];
+    const colors = ["#2563eb", "#22c55e", "#60a5fa", "#a78bfa", "#f59e0b"];
     const color = colors[i % colors.length];
     const left = 8 + Math.random() * 84;
     const delay = Math.random() * 0.5;
@@ -383,16 +344,23 @@ export default function ManagerReadinessPage() {
       {showCelebration && <Confetti />}
 
       {/* Page header */}
-      <h1 className="font-display text-2xl font-600">
-        Is {managerName} Ready?
+      <h1 className="text-[28px] font-900">
+        ✅ Is {managerName} Ready?
       </h1>
-      <p className="mt-1 text-sm text-text-muted">
+      <p className="mt-1 text-[15px] text-text-muted">
         Track readiness across paperwork, training, skills, and on-the-job tasks.
       </p>
 
+      {/* Helper box */}
+      <div className="mt-4 rounded-[10px] border-2 border-[#b6d4fe] bg-primary-light px-5 py-4">
+        <p className="text-[14px] text-text leading-relaxed">
+          💡 Mark each item as <strong>Ready</strong> or <strong>Needs Training</strong>. When something needs training, you can create an SOP to help.
+        </p>
+      </div>
+
       {/* ── Needs Training Banner ──────────────────────────────────── */}
       {needsTrainingCount > 0 && (
-        <div className="mt-5 flex items-center gap-3 rounded border border-warn/30 bg-warn-light px-4 py-3">
+        <div className="mt-5 flex items-center gap-3 rounded-[12px] border border-warn/30 bg-warn-light px-4 py-3">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-warn)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
             <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             <line x1="12" y1="9" x2="12" y2="13" />
@@ -405,7 +373,7 @@ export default function ManagerReadinessPage() {
       )}
 
       {/* ── Progress ring + stats ──────────────────────────────────── */}
-      <div className={`mt-6 flex items-center gap-6 rounded border border-card-border bg-card p-6 shadow ${allReady ? "celebrate-bounce" : ""}`}>
+      <div className={`mt-6 flex items-center gap-6 rounded-[16px] border-2 border-[#e0e0e0] bg-card p-6 shadow ${allReady ? "celebrate-bounce" : ""}`}>
         {/* SVG ring */}
         <div className="relative shrink-0">
           <svg width="128" height="128" viewBox="0 0 128 128">
@@ -496,12 +464,12 @@ export default function ManagerReadinessPage() {
           }
 
           return (
-            <div key={group.key} className="rounded border border-card-border bg-card shadow">
+            <div key={group.key} className="rounded-[12px] border-2 border-[#e0e0e0] bg-card shadow">
               {/* Group header */}
-              <div className="flex items-center gap-3 border-b border-card-border px-5 py-4">
-                <span className="text-text-muted">{group.icon}</span>
-                <h2 className="flex-1 font-display text-base font-600 text-text">{group.label}</h2>
-                <span className={`rounded-xs px-2.5 py-0.5 text-xs font-500 ${badgeStyle}`}>
+              <div className="flex items-center gap-3 border-b border-[#e0e0e0] px-5 py-4">
+                <span className="text-[18px]">{group.emoji}</span>
+                <h2 className="flex-1 text-[16px] font-800 text-text">{group.label}</h2>
+                <span className={`rounded-full px-3 py-1 text-[12px] font-700 ${badgeStyle}`}>
                   {badgeText}
                 </span>
               </div>
@@ -558,29 +526,21 @@ export default function ManagerReadinessPage() {
                           {item.description && (
                             <p className="mt-0.5 text-xs text-text-muted leading-relaxed">{item.description}</p>
                           )}
-                          {/* Create SOP / View SOP button */}
+                          {/* Create SOP / View SOP link */}
                           {item.linked_sop_id ? (
                             <Link
                               to={`/sops/${item.linked_sop_id}`}
-                              className="mt-1.5 inline-flex items-center gap-1 rounded-sm bg-accent-light px-2.5 py-1 text-xs font-500 text-accent transition-colors hover:bg-accent hover:text-white"
+                              className="mt-1.5 inline-block text-[12px] font-600 text-accent hover:underline"
                             >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                <circle cx="12" cy="12" r="3" />
-                              </svg>
-                              View SOP
+                              📚 View SOP
                             </Link>
                           ) : item.status === "needs_training" ? (
                             <button
                               type="button"
                               onClick={() => openCreateSOP({ title: item.title, readinessItemId: item.id })}
-                              className="mt-1.5 inline-flex items-center gap-1 rounded-sm bg-primary-light px-2.5 py-1 text-xs font-500 text-primary transition-colors hover:bg-primary hover:text-white"
+                              className="mt-1.5 text-[12px] font-600 text-primary hover:underline"
                             >
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <circle cx="12" cy="12" r="10" />
-                                <path d="M12 8v8M8 12h8" />
-                              </svg>
-                              Create SOP for this
+                              📝 Create SOP for this
                             </button>
                           ) : null}
                         </div>
@@ -616,7 +576,7 @@ export default function ManagerReadinessPage() {
                           <button
                             type="button"
                             onClick={() => toggleStatus(item, "ready")}
-                            className={`rounded-sm px-3 py-1.5 text-xs font-600 transition-colors ${
+                            className={`rounded-[6px] px-3.5 py-2 text-[12px] font-700 transition-colors ${
                               item.status === "ready"
                                 ? "bg-accent text-white"
                                 : "border border-card-border bg-card text-text-muted hover:border-accent hover:text-accent"
@@ -627,7 +587,7 @@ export default function ManagerReadinessPage() {
                           <button
                             type="button"
                             onClick={() => toggleStatus(item, "needs_training")}
-                            className={`rounded-sm px-3 py-1.5 text-xs font-600 transition-colors ${
+                            className={`rounded-[6px] px-3.5 py-2 text-[12px] font-700 transition-colors ${
                               item.status === "needs_training"
                                 ? "bg-warn text-white"
                                 : "border border-card-border bg-card text-text-muted hover:border-warn hover:text-warn"
