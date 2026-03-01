@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useSpeechRecognition from "../hooks/useSpeechRecognition";
 import { useAuth } from "../contexts/AuthContext";
+import { useCreateSOP } from "../contexts/CreateSOPContext";
 import { useToast } from "../contexts/ToastContext";
 import { supabase } from "../lib/supabase";
 import { fetchKnowledgeContext } from "../lib/knowledgeContext";
@@ -215,11 +216,36 @@ export default function CreateSOPModal({
 }: CreateSOPModalProps) {
   const navigate = useNavigate();
   const { userProfile } = useAuth();
+  const { consumePrefill } = useCreateSOP();
   const { showToast } = useToast();
 
   const [state, dispatch] = useReducer(reducer, initialState);
   const { currentStep } = state;
   const stepIndex = currentStep - 1;
+
+  // ── Consume prefill data when modal opens ───────────────────────────
+  const hasPrefillRef = useRef(false);
+  useEffect(() => {
+    if (!isOpen) {
+      hasPrefillRef.current = false;
+      return;
+    }
+    if (hasPrefillRef.current) return;
+    hasPrefillRef.current = true;
+
+    const prefill = consumePrefill();
+    if (prefill?.title) {
+      dispatch({ type: "RESET" });
+      dispatch({
+        type: "SET_SOP_INFO",
+        title: prefill.title,
+        category: "",
+        description: "",
+      });
+      // Skip Step 1 (Choose SOP) — go straight to Step 2 (Build Mode)
+      dispatch({ type: "SET_STEP", step: 2 });
+    }
+  }, [isOpen, consumePrefill]);
 
   const handleTranscriptChunk = useCallback((chunk: string) => {
     dispatch({ type: "APPEND_TRANSCRIPT", chunk });
