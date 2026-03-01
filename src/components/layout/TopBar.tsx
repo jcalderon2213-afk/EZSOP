@@ -10,6 +10,7 @@ const labelMap: Record<string, string> = {
   draft: "Draft Editor",
   compliance: "Compliance Audit",
   profile: "Business Profile",
+  readiness: "Manager Readiness",
   practice: "Practice Mode",
   debrief: "Debrief",
 };
