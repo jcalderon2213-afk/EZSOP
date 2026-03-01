@@ -225,6 +225,7 @@ export default function CreateSOPModal({
 
   // ── Consume prefill data when modal opens ───────────────────────────
   const hasPrefillRef = useRef(false);
+  const readinessItemIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!isOpen) {
       hasPrefillRef.current = false;
@@ -245,6 +246,8 @@ export default function CreateSOPModal({
       // Skip Step 1 (Choose SOP) — go straight to Step 2 (Build Mode)
       dispatch({ type: "SET_STEP", step: 2 });
     }
+    // Store readiness item ID for linking after finalization
+    readinessItemIdRef.current = prefill?.readinessItemId ?? null;
   }, [isOpen, consumePrefill]);
 
   const handleTranscriptChunk = useCallback((chunk: string) => {
@@ -602,7 +605,16 @@ export default function CreateSOPModal({
         if (stepsError) throw stepsError;
       }
 
-      // 3. Success
+      // 3. Link to readiness item if applicable
+      if (readinessItemIdRef.current) {
+        await supabase
+          .from("manager_readiness_items")
+          .update({ linked_sop_id: sop.id, updated_at: new Date().toISOString() })
+          .eq("id", readinessItemIdRef.current);
+        readinessItemIdRef.current = null;
+      }
+
+      // 4. Success
       showToast("SOP finalized!", "success");
       onClose();
       navigate(`/sops/${sop.id}`);

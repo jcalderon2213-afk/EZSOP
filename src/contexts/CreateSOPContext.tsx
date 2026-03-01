@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 export interface SOPPrefillData {
   title?: string;
+  readinessItemId?: string;
 }
 
 interface CreateSOPContextValue {

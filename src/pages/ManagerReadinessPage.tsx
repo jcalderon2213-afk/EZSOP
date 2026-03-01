@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useCreateSOP } from "../contexts/CreateSOPContext";
 import { useToast } from "../contexts/ToastContext";
@@ -557,11 +558,22 @@ export default function ManagerReadinessPage() {
                           {item.description && (
                             <p className="mt-0.5 text-xs text-text-muted leading-relaxed">{item.description}</p>
                           )}
-                          {/* Create SOP button */}
-                          {item.status === "needs_training" && (
+                          {/* Create SOP / View SOP button */}
+                          {item.linked_sop_id ? (
+                            <Link
+                              to={`/sops/${item.linked_sop_id}`}
+                              className="mt-1.5 inline-flex items-center gap-1 rounded-sm bg-accent-light px-2.5 py-1 text-xs font-500 text-accent transition-colors hover:bg-accent hover:text-white"
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                <circle cx="12" cy="12" r="3" />
+                              </svg>
+                              View SOP
+                            </Link>
+                          ) : item.status === "needs_training" ? (
                             <button
                               type="button"
-                              onClick={() => openCreateSOP({ title: item.title })}
+                              onClick={() => openCreateSOP({ title: item.title, readinessItemId: item.id })}
                               className="mt-1.5 inline-flex items-center gap-1 rounded-sm bg-primary-light px-2.5 py-1 text-xs font-500 text-primary transition-colors hover:bg-primary hover:text-white"
                             >
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -570,7 +582,7 @@ export default function ManagerReadinessPage() {
                               </svg>
                               Create SOP for this
                             </button>
-                          )}
+                          ) : null}
                         </div>
 
                         {/* Edit / Delete buttons (visible on hover) */}
