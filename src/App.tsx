@@ -48,8 +48,8 @@ function App() {
           </Route>
         </Route>
 
-        {/* App routes — needs session + org + knowledge base */}
-        <Route element={<ProtectedRoute requireKnowledgeBase />}>
+        {/* App routes — needs session + org */}
+        <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
