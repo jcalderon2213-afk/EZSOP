@@ -15,6 +15,7 @@ import KnowledgeBuilderPage from "./pages/KnowledgeBuilderPage";
 import ComplianceLogPage from "./pages/ComplianceLogPage";
 import ManagerReadinessPage from "./pages/ManagerReadinessPage";
 import NormaNotesPage from "./pages/NormaNotesPage";
+import SopChecklistPage from "./pages/SopChecklistPage";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -59,6 +60,7 @@ function App() {
             <Route path="practice/:scenarioId" element={<PracticeChatPage />} />
             <Route path="practice/:scenarioId/debrief" element={<PracticeDebriefPage />} />
             <Route path="readiness" element={<ManagerReadinessPage />} />
+            <Route path="sop-checklist" element={<SopChecklistPage />} />
             <Route path="compliance" element={<ComplianceLogPage />} />
           </Route>
         </Route>

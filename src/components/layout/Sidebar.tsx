@@ -4,6 +4,7 @@ import { useCreateSOP } from "../../contexts/CreateSOPContext";
 const navItems = [
   { label: "Home", to: "/dashboard", emoji: "🏠" },
   { label: "My SOPs", to: "/sops", emoji: "📚" },
+  { label: "SOP Checklist", to: "/sop-checklist", emoji: "📋" },
   { label: "Is Juan Ready?", to: "/readiness", emoji: "✅" },
   { label: "Norma's Notes", to: "/norma-notes", emoji: "📝" },
 ];
