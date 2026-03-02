@@ -5,6 +5,7 @@ import {
   getChecklistTotal,
 } from "../data/afhSopChecklist";
 import type { AfhSopCategory, AfhSopChecklistItem } from "../data/afhSopChecklist";
+import { useCreateSOP } from "../contexts/CreateSOPContext";
 
 // Category description blurbs
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
@@ -34,32 +35,41 @@ const CATEGORY_DESCRIPTIONS: Record<string, string> = {
 
 export default function SopChecklistPage() {
   const [selectedKey, setSelectedKey] = useState(afhSopCategories[0].key);
+  const { openCreateSOP } = useCreateSOP();
   const totalItems = getChecklistTotal();
   const selectedCategory = afhSopCategories.find((c) => c.key === selectedKey)!;
   const items = getChecklistByCategory(selectedKey);
 
+  function handleStartSOP(item: AfhSopChecklistItem) {
+    // Strip leading "How do you " to get a clean SOP title
+    const raw = item.question.replace(/\?$/, "");
+    const title = raw.replace(/^How do you /i, "").replace(/^What do you do /i, "").replace(/^What are your /i, "");
+    // Capitalize first letter
+    const sopTitle = title.charAt(0).toUpperCase() + title.slice(1);
+    openCreateSOP({ title: sopTitle });
+  }
+
   return (
-    <div className="flex gap-6" style={{ minHeight: "calc(100vh - 120px)" }}>
+    <div className="flex" style={{ minHeight: "calc(100vh - 120px)", margin: "-32px -32px -32px -32px" }}>
       {/* ── LEFT PANEL: Category sub-menu ─────────────────────────────── */}
-      <div className="w-[260px] shrink-0">
-        <div className="sticky top-[76px] rounded-lg border border-gray-200 bg-white">
+      <div className="w-72 shrink-0 border-r border-gray-200 bg-white">
+        <div className="sticky top-[60px] overflow-y-auto" style={{ maxHeight: "calc(100vh - 60px)" }}>
           {/* Header */}
-          <div className="border-b border-gray-100 px-5 py-4">
+          <div className="border-b border-gray-100 px-5 py-5">
             <h1 className="text-lg font-700 text-gray-900">SOP Checklist</h1>
             <p className="mt-0.5 text-[13px] text-gray-500">
               0 of {totalItems} done
             </p>
-            {/* Overall progress bar */}
-            <div className="mt-2 h-1.5 w-full rounded-full bg-gray-100">
+            <div className="mt-2.5 h-1.5 w-full rounded-full bg-gray-100">
               <div
-                className="h-full rounded-full bg-blue-600 transition-all"
+                className="h-full rounded-full bg-blue-500 transition-all"
                 style={{ width: "0%" }}
               />
             </div>
           </div>
 
           {/* Category list */}
-          <nav className="max-h-[calc(100vh-220px)] overflow-y-auto py-1">
+          <nav className="py-1">
             {afhSopCategories.map((cat) => (
               <CategoryRow
                 key={cat.key}
@@ -74,22 +84,22 @@ export default function SopChecklistPage() {
       </div>
 
       {/* ── RIGHT PANEL: Checklist items ──────────────────────────────── */}
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 overflow-y-auto bg-[#fefdf8] p-8">
         {/* Category header */}
-        <div className="mb-5">
-          <h2 className="flex items-center gap-2 text-xl font-700 text-gray-900">
-            <span>{selectedCategory.icon}</span>
+        <div className="mb-6">
+          <h2 className="flex items-center gap-2.5 text-xl font-700 text-gray-900">
+            <span className="text-xl">{selectedCategory.icon}</span>
             {selectedCategory.label}
           </h2>
-          <p className="mt-1 text-[14px] text-gray-500">
+          <p className="mt-1.5 text-[14px] text-gray-500">
             {CATEGORY_DESCRIPTIONS[selectedKey] ?? ""}
           </p>
 
           {/* Category progress */}
-          <div className="mt-3 flex items-center gap-3">
+          <div className="mt-4 flex items-center gap-3">
             <div className="h-1.5 flex-1 rounded-full bg-gray-100">
               <div
-                className="h-full rounded-full bg-blue-600 transition-all"
+                className="h-full rounded-full bg-blue-500 transition-all"
                 style={{ width: "0%" }}
               />
             </div>
@@ -99,10 +109,14 @@ export default function SopChecklistPage() {
           </div>
         </div>
 
-        {/* Items list */}
-        <div className="space-y-3">
+        {/* Items list — flat rows, no card borders */}
+        <div>
           {items.map((item) => (
-            <ChecklistItemRow key={item.id} item={item} />
+            <ChecklistItemRow
+              key={item.id}
+              item={item}
+              onStart={() => handleStartSOP(item)}
+            />
           ))}
         </div>
       </div>
@@ -131,32 +145,32 @@ function CategoryRow({
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center gap-3 px-5 py-2.5 text-left transition-colors ${
+      className={`flex w-full cursor-pointer items-center gap-3 px-5 py-2.5 text-left transition-colors ${
         isActive
-          ? "border-l-[3px] border-blue-600 bg-blue-50"
+          ? "border-l-[3px] border-blue-500 bg-blue-50"
           : "border-l-[3px] border-transparent hover:bg-gray-50"
       }`}
     >
       <span className="text-base leading-none">{category.icon}</span>
       <div className="min-w-0 flex-1">
         <p
-          className={`truncate text-[13px] font-600 ${
+          className={`text-[13px] font-600 leading-snug ${
             isActive ? "text-blue-700" : "text-gray-700"
           }`}
         >
           {category.label}
         </p>
-        <p className="text-[11px] text-gray-400">
+        <p className="mt-0.5 text-[11px] text-gray-400">
           {completedCount} of {total} done
         </p>
       </div>
       {/* Badge */}
       <span
-        className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-700 ${
+        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
           allDone
             ? "bg-green-100 text-green-700"
             : inProgress
-              ? "bg-blue-100 text-blue-700"
+              ? "bg-blue-100 text-blue-600"
               : "bg-gray-100 text-gray-400"
         }`}
       >
@@ -166,32 +180,36 @@ function CategoryRow({
   );
 }
 
-function ChecklistItemRow({ item }: { item: AfhSopChecklistItem }) {
-  // All items show as "still needed" for now
+function ChecklistItemRow({
+  item,
+  onStart,
+}: {
+  item: AfhSopChecklistItem;
+  onStart: () => void;
+}) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-5 py-4 transition-colors hover:border-blue-200">
-      <div className="flex items-start gap-3">
-        {/* Empty circle */}
-        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-gray-300" />
+    <div className="flex items-start gap-3 rounded-md px-4 py-4 transition-colors hover:bg-gray-50">
+      {/* Empty circle */}
+      <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-gray-300" />
 
-        {/* Content */}
-        <div className="min-w-0 flex-1">
-          <p className="text-[14px] font-600 text-gray-800 leading-snug">
-            {item.question}
-          </p>
-          <p className="mt-1 text-[13px] text-gray-400 leading-relaxed">
-            {item.why}
-          </p>
-        </div>
-
-        {/* Action button */}
-        <button
-          type="button"
-          className="shrink-0 rounded-md bg-blue-600 px-3.5 py-1.5 text-[12px] font-600 text-white transition-colors hover:bg-blue-700"
-        >
-          Start This SOP
-        </button>
+      {/* Content */}
+      <div className="min-w-0 flex-1">
+        <p className="text-[14px] font-600 leading-snug text-gray-800">
+          {item.question}
+        </p>
+        <p className="mt-1 text-[13px] leading-relaxed text-gray-400">
+          {item.why}
+        </p>
       </div>
+
+      {/* Action button */}
+      <button
+        type="button"
+        onClick={onStart}
+        className="shrink-0 rounded-md bg-blue-600 px-3.5 py-1.5 text-[12px] font-600 text-white transition-colors hover:bg-blue-700"
+      >
+        Start This SOP
+      </button>
     </div>
   );
 }
