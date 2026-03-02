@@ -5,6 +5,7 @@ export interface SOPPrefillData {
   title?: string;
   readinessItemId?: string;
   isDayInLife?: boolean;
+  checklistItemId?: string;
 }
 
 interface CreateSOPContextValue {

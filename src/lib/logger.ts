@@ -37,16 +37,6 @@ function getEnvVar(name: string): string | undefined {
     // import.meta not available — skip
   }
 
-  // Fall back to process.env (Node.js / SSR)
-  try {
-    if (typeof process !== "undefined" && process.env) {
-      const val = process.env[name];
-      if (val !== undefined) return String(val);
-    }
-  } catch {
-    // process not available — skip
-  }
-
   return undefined;
 }
 
@@ -54,13 +44,6 @@ function isDevMode(): boolean {
   try {
     if (typeof import.meta !== "undefined" && import.meta.env) {
       return !!import.meta.env.DEV;
-    }
-  } catch {
-    // ignore
-  }
-  try {
-    if (typeof process !== "undefined" && process.env) {
-      return process.env.NODE_ENV !== "production";
     }
   } catch {
     // ignore

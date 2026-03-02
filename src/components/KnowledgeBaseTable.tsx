@@ -120,7 +120,7 @@ const STATUS_OPTIONS = ["All", "Verified", "Pending", "Skipped"] as const;
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function KnowledgeBaseTable({
-  orgId,
+  orgId: _orgId,
   items,
   onItemsChange,
   knowledgeBase,

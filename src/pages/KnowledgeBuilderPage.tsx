@@ -596,7 +596,7 @@ export default function KnowledgeBuilderPage() {
       return (
         <div className="page-enter">
           <KnowledgeBaseTable
-            orgId={userProfile!.org_id}
+            orgId={userProfile!.org_id ?? ""}
             items={checklistItems}
             onItemsChange={setChecklistItems}
             knowledgeBase={knowledgeBase}
@@ -610,7 +610,7 @@ export default function KnowledgeBuilderPage() {
           <AddSourceModal
             isOpen={addSourceOpen}
             onClose={() => setAddSourceOpen(false)}
-            orgId={userProfile!.org_id}
+            orgId={userProfile!.org_id ?? ""}
             existingCount={checklistItems.length}
             onSourceAdded={(item) => setChecklistItems((prev) => [...prev, item])}
           />

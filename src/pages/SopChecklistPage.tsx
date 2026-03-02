@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   afhSopCategories,
   getChecklistByCategory,
@@ -6,6 +7,8 @@ import {
 } from "../data/afhSopChecklist";
 import type { AfhSopCategory, AfhSopChecklistItem } from "../data/afhSopChecklist";
 import { useCreateSOP } from "../contexts/CreateSOPContext";
+import { useAuth } from "../contexts/AuthContext";
+import { supabase } from "../lib/supabase";
 
 // Short names for left panel (matching mockup)
 const SHORT_NAMES: Record<string, string> = {
@@ -48,12 +51,71 @@ const CATEGORY_DESCRIPTIONS: Record<string, string> = {
     "Personal property tracking, complaint resolution, and privacy protections.",
 };
 
+// Map checklist_item_id → { sopId, status }
+interface LinkedSop {
+  sopId: string;
+  status: "draft" | "published" | "archived";
+}
+
 export default function SopChecklistPage() {
   const [selectedKey, setSelectedKey] = useState(afhSopCategories[0].key);
-  const { openCreateSOP } = useCreateSOP();
+  const { openCreateSOP, isOpen: modalIsOpen } = useCreateSOP();
+  const { userProfile } = useAuth();
+  const navigate = useNavigate();
   const totalItems = getChecklistTotal();
   const selectedCategory = afhSopCategories.find((c) => c.key === selectedKey)!;
   const items = getChecklistByCategory(selectedKey);
+
+  // ── Fetch linked SOPs from DB ──────────────────────────────────────
+  const [linkedSops, setLinkedSops] = useState<Record<string, LinkedSop>>({});
+
+  const fetchLinkedSops = useCallback(async () => {
+    if (!userProfile?.org_id) return;
+    const { data } = await supabase
+      .from("sops")
+      .select("id, checklist_item_id, status")
+      .eq("org_id", userProfile.org_id)
+      .not("checklist_item_id", "is", null)
+      .is("deleted_at", null);
+
+    if (!data) return;
+
+    const map: Record<string, LinkedSop> = {};
+    for (const sop of data) {
+      const cid = sop.checklist_item_id as string;
+      const existing = map[cid];
+      // Prefer published > draft > archived
+      if (!existing || (existing.status !== "published" && sop.status === "published")) {
+        map[cid] = { sopId: sop.id, status: sop.status };
+      }
+    }
+    setLinkedSops(map);
+  }, [userProfile?.org_id]);
+
+  useEffect(() => {
+    fetchLinkedSops();
+  }, [fetchLinkedSops]);
+
+  // Re-fetch when modal closes (SOP may have been created or draft saved)
+  useEffect(() => {
+    if (!modalIsOpen) {
+      fetchLinkedSops();
+    }
+  }, [modalIsOpen, fetchLinkedSops]);
+
+  // ── Compute progress counts ────────────────────────────────────────
+  function getCompletedCount(categoryKey: string): number {
+    const catItems = getChecklistByCategory(categoryKey);
+    return catItems.filter((item) => linkedSops[item.id]?.status === "published").length;
+  }
+
+  const totalCompleted = afhSopCategories.reduce(
+    (sum, cat) => sum + getCompletedCount(cat.key),
+    0,
+  );
+  const selectedCompleted = getCompletedCount(selectedKey);
+  const overallPct = totalItems > 0 ? Math.round((totalCompleted / totalItems) * 100) : 0;
+  const categoryPct = items.length > 0 ? Math.round((selectedCompleted / items.length) * 100) : 0;
 
   function handleStartSOP(item: AfhSopChecklistItem) {
     const raw = item.question.replace(/\?$/, "");
@@ -62,7 +124,11 @@ export default function SopChecklistPage() {
       .replace(/^What do you do /i, "")
       .replace(/^What are your /i, "");
     const sopTitle = title.charAt(0).toUpperCase() + title.slice(1);
-    openCreateSOP({ title: sopTitle });
+    openCreateSOP({ title: sopTitle, checklistItemId: item.id });
+  }
+
+  function handleViewSOP(sopId: string) {
+    navigate(`/sops/${sopId}`);
   }
 
   return (
@@ -75,13 +141,13 @@ export default function SopChecklistPage() {
             SOP Checklist
           </p>
           <p className="mb-2 text-[13px] text-gray-500">
-            <strong className="font-700 text-blue-600">0</strong> of <strong className="font-700 text-blue-600">{totalItems}</strong> done
+            <strong className="font-700 text-blue-600">{totalCompleted}</strong> of <strong className="font-700 text-blue-600">{totalItems}</strong> done
           </p>
           {/* Mini progress bar with gradient */}
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
             <div
-              className="h-full rounded-full"
-              style={{ width: "0%", background: "linear-gradient(90deg, #3b82f6, #60a5fa)" }}
+              className="h-full rounded-full transition-all"
+              style={{ width: `${overallPct}%`, background: "linear-gradient(90deg, #3b82f6, #60a5fa)" }}
             />
           </div>
         </div>
@@ -94,7 +160,7 @@ export default function SopChecklistPage() {
               category={cat}
               shortName={SHORT_NAMES[cat.key] ?? cat.label}
               isActive={cat.key === selectedKey}
-              completedCount={0}
+              completedCount={getCompletedCount(cat.key)}
               onClick={() => setSelectedKey(cat.key)}
             />
           ))}
@@ -118,11 +184,11 @@ export default function SopChecklistPage() {
             <div className="h-2 overflow-hidden rounded-full bg-gray-100" style={{ flex: 1, maxWidth: 200 }}>
               <div
                 className="h-full rounded-full bg-blue-400 transition-all"
-                style={{ width: "0%" }}
+                style={{ width: `${categoryPct}%` }}
               />
             </div>
             <span className="text-[13px] font-600 text-gray-500">
-              0 of {items.length} done
+              {selectedCompleted} of {items.length} done
             </span>
           </div>
         </div>
@@ -133,7 +199,9 @@ export default function SopChecklistPage() {
             <ChecklistItemRow
               key={item.id}
               item={item}
+              linked={linkedSops[item.id] ?? null}
               onStart={() => handleStartSOP(item)}
+              onView={(sopId) => handleViewSOP(sopId)}
             />
           ))}
         </div>
@@ -203,25 +271,48 @@ function CategoryRow({
 
 function ChecklistItemRow({
   item,
+  linked,
   onStart,
+  onView,
 }: {
   item: AfhSopChecklistItem;
+  linked: LinkedSop | null;
   onStart: () => void;
+  onView: (sopId: string) => void;
 }) {
+  const isPublished = linked?.status === "published";
+  const isDraft = linked?.status === "draft";
+
   return (
     <div
       className="flex items-start rounded-lg transition-colors hover:bg-white"
       style={{ gap: 14, padding: 16 }}
     >
-      {/* Empty circle */}
-      <div
-        className="mt-px shrink-0 rounded-full border-2 border-gray-300"
-        style={{ width: 26, height: 26 }}
-      />
+      {/* Status circle */}
+      {isPublished ? (
+        <div
+          className="mt-px flex shrink-0 items-center justify-center rounded-full bg-green-500 text-white"
+          style={{ width: 26, height: 26, fontSize: 14 }}
+        >
+          ✓
+        </div>
+      ) : isDraft ? (
+        <div
+          className="mt-px flex shrink-0 items-center justify-center rounded-full border-2 border-amber-400 bg-amber-50"
+          style={{ width: 26, height: 26, fontSize: 11 }}
+        >
+          <span className="text-amber-600">●</span>
+        </div>
+      ) : (
+        <div
+          className="mt-px shrink-0 rounded-full border-2 border-gray-300"
+          style={{ width: 26, height: 26 }}
+        />
+      )}
 
       {/* Content */}
       <div className="min-w-0 flex-1">
-        <p className="text-[14px] font-500 leading-snug text-gray-800" style={{ marginBottom: 3 }}>
+        <p className={`text-[14px] font-500 leading-snug ${isPublished ? "text-gray-500 line-through" : "text-gray-800"}`} style={{ marginBottom: 3 }}>
           {item.question}
         </p>
         <p className="text-[13px] leading-snug text-gray-400">
@@ -231,14 +322,34 @@ function ChecklistItemRow({
 
       {/* Action button */}
       <div className="mt-px shrink-0">
-        <button
-          type="button"
-          onClick={onStart}
-          className="flex items-center whitespace-nowrap rounded-lg bg-blue-600 text-[13px] font-600 text-white transition-colors hover:bg-blue-700"
-          style={{ gap: 6, padding: "7px 14px" }}
-        >
-          🎤 Start This SOP
-        </button>
+        {isPublished ? (
+          <button
+            type="button"
+            onClick={() => onView(linked!.sopId)}
+            className="flex items-center whitespace-nowrap rounded-lg bg-green-600 text-[13px] font-600 text-white transition-colors hover:bg-green-700"
+            style={{ gap: 6, padding: "7px 14px" }}
+          >
+            View SOP
+          </button>
+        ) : isDraft ? (
+          <button
+            type="button"
+            onClick={onStart}
+            className="flex items-center whitespace-nowrap rounded-lg bg-amber-500 text-[13px] font-600 text-white transition-colors hover:bg-amber-600"
+            style={{ gap: 6, padding: "7px 14px" }}
+          >
+            Continue SOP
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onStart}
+            className="flex items-center whitespace-nowrap rounded-lg bg-blue-600 text-[13px] font-600 text-white transition-colors hover:bg-blue-700"
+            style={{ gap: 6, padding: "7px 14px" }}
+          >
+            🎤 Start This SOP
+          </button>
+        )}
       </div>
     </div>
   );

@@ -283,11 +283,59 @@ export default function CreateSOPModal({
   // ── Consume prefill data when modal opens ───────────────────────────
   const hasPrefillRef = useRef(false);
   const readinessItemIdRef = useRef<string | null>(null);
+  const checklistItemIdRef = useRef<string | null>(null);
   const isDayInLifeRef = useRef(false);
+  // ── Draft auto-save on close (fire-and-forget) ────────────────────
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const saveDraftOnClose = useCallback(async () => {
+    const s = stateRef.current;
+    const cid = checklistItemIdRef.current;
+    if (!userProfile?.org_id || !cid || !s.sopTitle.trim()) return;
+    // Only save draft if user progressed past step 1 but didn't finalize
+    if (s.currentStep < 2) return;
+    try {
+      // Check if a draft already exists for this checklist item
+      const { data: existing } = await supabase
+        .from("sops")
+        .select("id")
+        .eq("org_id", userProfile.org_id)
+        .eq("checklist_item_id", cid)
+        .eq("status", "draft")
+        .is("deleted_at", null)
+        .maybeSingle();
+
+      if (existing) {
+        // Update existing draft
+        await supabase
+          .from("sops")
+          .update({ title: s.sopTitle, category: s.sopCategory, updated_at: new Date().toISOString() })
+          .eq("id", existing.id);
+      } else {
+        // Create new draft
+        await supabase
+          .from("sops")
+          .insert({
+            title: s.sopTitle,
+            category: s.sopCategory,
+            status: "draft",
+            org_id: userProfile.org_id,
+            created_by: userProfile.id,
+            checklist_item_id: cid,
+          });
+      }
+    } catch {
+      // Silent — draft save should never block
+    }
+  }, [userProfile]);
+
   useEffect(() => {
     if (!isOpen) {
+      // Auto-save draft before resetting
+      saveDraftOnClose();
       hasPrefillRef.current = false;
       isDayInLifeRef.current = false;
+      checklistItemIdRef.current = null;
       hasLoadedGuidedRef.current = false;
       hasLoadedRecsRef.current = false;
       hasGeneratedRef.current = false;
@@ -309,8 +357,9 @@ export default function CreateSOPModal({
       // Skip Step 1 (Pick a Procedure) — go straight to Step 2 (Build Mode)
       dispatch({ type: "SET_STEP", step: 2 });
     }
-    // Store readiness item ID for linking after finalization
+    // Store readiness item ID and checklist item ID for linking after finalization
     readinessItemIdRef.current = prefill?.readinessItemId ?? null;
+    checklistItemIdRef.current = prefill?.checklistItemId ?? null;
     isDayInLifeRef.current = prefill?.isDayInLife ?? false;
   }, [isOpen, consumePrefill]);
 
@@ -723,7 +772,18 @@ export default function CreateSOPModal({
     setFinalizing(true);
 
     try {
-      // 1. Create SOP row
+      // 1. If finalizing from a checklist item, delete any existing draft for it
+      if (checklistItemIdRef.current) {
+        await supabase
+          .from("sops")
+          .update({ deleted_at: new Date().toISOString() })
+          .eq("org_id", userProfile.org_id)
+          .eq("checklist_item_id", checklistItemIdRef.current)
+          .eq("status", "draft")
+          .is("deleted_at", null);
+      }
+
+      // 2. Create SOP row
       const { data: sop, error: sopError } = await supabase
         .from("sops")
         .insert({
@@ -732,13 +792,14 @@ export default function CreateSOPModal({
           status: "published",
           org_id: userProfile.org_id,
           created_by: userProfile.id,
+          ...(checklistItemIdRef.current ? { checklist_item_id: checklistItemIdRef.current } : {}),
         })
         .select()
         .single();
 
       if (sopError) throw sopError;
 
-      // 2. Insert all steps (map resources → links jsonb column)
+      // 3. Insert all steps (map resources → links jsonb column)
       const stepRows = state.generatedSteps.map((s) => ({
         sop_id: sop.id,
         step_number: s.step_number,
@@ -755,7 +816,7 @@ export default function CreateSOPModal({
         if (stepsError) throw stepsError;
       }
 
-      // 3. Link to readiness item if applicable
+      // 4. Link to readiness item if applicable
       if (readinessItemIdRef.current) {
         await supabase
           .from("manager_readiness_items")
@@ -764,7 +825,10 @@ export default function CreateSOPModal({
         readinessItemIdRef.current = null;
       }
 
-      // 4. Success
+      // 5. Clear checklist ref so draft auto-save doesn't trigger on close
+      checklistItemIdRef.current = null;
+
+      // 6. Success
       showToast("SOP finalized!", "success");
       onClose();
       navigate(`/sops/${sop.id}`);

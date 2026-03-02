@@ -225,7 +225,7 @@ export default function SOPLibraryPage() {
           )}
           <button
             type="button"
-            onClick={openCreateSOP}
+            onClick={() => openCreateSOP()}
             className="rounded-[8px] bg-primary px-6 py-3 text-[15px] font-700 text-white transition-colors hover:bg-primary-hover"
           >
             + New SOP
