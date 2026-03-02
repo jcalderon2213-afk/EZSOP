@@ -1,17 +1,41 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { createClient } from "npm:@supabase/supabase-js";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers":
-    "authorization, content-type, x-client-info, apikey",
-};
+// ── Dynamic CORS ─────────────────────────────────────────────────────────────
+const ALLOWED_ORIGINS = [
+  /^http:\/\/localhost:\d+$/,        // local dev (any port)
+  /^https:\/\/[^/]+\.netlify\.app$/, // Netlify preview/deploy URLs
+  /^https:\/\/ezsop\.com$/,          // future custom domain
+  /^https:\/\/www\.ezsop\.com$/,
+];
+
+function getAllowedOrigin(req: Request): string | null {
+  const origin = req.headers.get("origin");
+  if (!origin) return null;
+  return ALLOWED_ORIGINS.some((re) => re.test(origin)) ? origin : null;
+}
+
+function getCorsHeaders(req: Request): Record<string, string> {
+  const origin = getAllowedOrigin(req);
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers":
+      "authorization, content-type, x-client-info, apikey",
+  };
+  if (origin) {
+    headers["Access-Control-Allow-Origin"] = origin;
+    headers["Vary"] = "Origin";
+  }
+  return headers;
+}
+
+// Keep a per-request reference so jsonResponse can access CORS headers
+let _currentCorsHeaders: Record<string, string> = {};
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json", ...corsHeaders },
+    headers: { "Content-Type": "application/json", ..._currentCorsHeaders },
   });
 }
 
@@ -86,13 +110,43 @@ async function fetchKnowledgeContext(
 }
 
 Deno.serve(async (req) => {
+  // Set CORS headers for this request
+  _currentCorsHeaders = getCorsHeaders(req);
+
   // CORS preflight
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    return new Response(null, { status: 204, headers: _currentCorsHeaders });
   }
 
   try {
+    // ── Parse request body (must read before anything else) ──────────
     const { action, payload } = await req.json();
+
+    // ── Auth validation ──────────────────────────────────────────────
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader) {
+      return jsonResponse({ success: false, error: "Missing authorization header" }, 401);
+    }
+    const token = authHeader.replace(/^Bearer\s+/i, "");
+
+    // Use admin client to verify the JWT (service role can validate any token)
+    const adminClient = getSupabaseAdmin();
+    const { data: { user }, error: authError } = await adminClient.auth.getUser(token);
+    if (authError || !user) {
+      return jsonResponse({ success: false, error: "Invalid or expired token" }, 401);
+    }
+
+    // Look up the user's org_id (trusted, not from payload)
+    const { data: userRow, error: userError } = await adminClient
+      .from("users")
+      .select("org_id")
+      .eq("id", user.id)
+      .single();
+
+    if (userError || !userRow?.org_id) {
+      return jsonResponse({ success: false, error: "User has no organization" }, 403);
+    }
+    const authenticatedOrgId: string = userRow.org_id;
 
     if (!action) {
       return jsonResponse({ success: false, error: "Missing action" }, 400);
@@ -105,7 +159,6 @@ Deno.serve(async (req) => {
     switch (action) {
       case "recommend-sops": {
         const {
-          org_id,
           industry_type,
           state,
           county,
@@ -136,10 +189,10 @@ Deno.serve(async (req) => {
         const locationParts = [state];
         if (county) locationParts.push(`${county} County`);
 
-        // Auto-fetch knowledge context from DB if org_id is provided
+        // Auto-fetch knowledge context from DB
         let knowledgeBlock = "";
-        if (org_id) {
-          const dbKnowledge = await fetchKnowledgeContext(org_id, [
+        {
+          const dbKnowledge = await fetchKnowledgeContext(authenticatedOrgId, [
             "rules-and-policies",
             "documentation",
             "forms",
@@ -194,7 +247,6 @@ Return a JSON array of objects with these fields:
 
       case "generate-sop-steps": {
         const {
-          org_id,
           transcript,
           context_links,
           regulation_text,
@@ -231,11 +283,10 @@ Return a JSON array of objects with these fields:
 
         // Auto-fetch knowledge context from DB
         let knowledgeBlock = "";
-        if (org_id) {
-          // Pick categories relevant to the SOP being generated
+        {
           const relevantCategories = getCategoriesForSop(sop_category || sop_title || "");
           const dbKnowledge = await fetchKnowledgeContext(
-            org_id,
+            authenticatedOrgId,
             relevantCategories,
             20,
           );
@@ -303,7 +354,6 @@ Break this process into clear, numbered steps. Reference specific Oregon AFH for
 
       case "generate-guided-questions": {
         const {
-          org_id: guidedOrgId,
           sop_title: guidedTitle,
           sop_category: guidedCategory,
           is_day_in_life: guidedDayInLife,
@@ -321,12 +371,12 @@ Break this process into clear, numbered steps. Reference specific Oregon AFH for
 
         // Fetch knowledge context for regulatory-aware questions
         let guidedKnowledge = "";
-        if (guidedOrgId) {
+        {
           const relevantCategories = getCategoriesForSop(
             guidedCategory || guidedTitle || "",
           );
           const dbKnowledge = await fetchKnowledgeContext(
-            guidedOrgId,
+            authenticatedOrgId,
             relevantCategories,
             20,
           );
@@ -421,7 +471,6 @@ Return ONLY a JSON object in this exact format, no markdown, no backticks:
 
       case "compliance-check": {
         const {
-          org_id,
           sop_title,
           steps: sopSteps,
           industry_type,
@@ -469,8 +518,8 @@ Return ONLY a JSON object in this exact format, no markdown, no backticks:
 
         // Auto-fetch ALL knowledge for compliance checking
         let knowledgeBlock = "";
-        if (org_id) {
-          const dbKnowledge = await fetchKnowledgeContext(org_id, undefined, 40);
+        {
+          const dbKnowledge = await fetchKnowledgeContext(authenticatedOrgId, undefined, 40);
           if (dbKnowledge) {
             knowledgeBlock = `\n\nOregon AFH Compliance Knowledge Base (check the SOP against these REAL regulations and requirements):\n${dbKnowledge}`;
           }
@@ -1058,23 +1107,6 @@ Return ONLY a valid JSON object. No markdown code fences, no commentary, no expl
             learned_topics: kbResult.learned_topics,
           },
         });
-      }
-
-      case "test": {
-        const prompt = payload?.prompt || "Say hello";
-
-        const message = await client.messages.create({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1024,
-          system:
-            "You are a helpful assistant. Keep responses concise.",
-          messages: [{ role: "user", content: prompt }],
-        });
-
-        const text =
-          message.content[0].type === "text" ? message.content[0].text : "";
-
-        return jsonResponse({ success: true, data: { response: text } });
       }
 
       default:
