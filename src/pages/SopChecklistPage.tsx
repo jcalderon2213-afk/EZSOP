@@ -7,7 +7,7 @@ import {
 import type { AfhSopCategory, AfhSopChecklistItem } from "../data/afhSopChecklist";
 import { useCreateSOP } from "../contexts/CreateSOPContext";
 
-// Short names for left panel
+// Short names for left panel (matching mockup)
 const SHORT_NAMES: Record<string, string> = {
   "daily-ops": "Daily Operations",
   medication: "Medication Mgmt",
@@ -22,10 +22,10 @@ const SHORT_NAMES: Record<string, string> = {
   "resident-rights": "Resident Rights",
 };
 
-// Category description blurbs
+// Category description blurbs for right panel
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
   "daily-ops":
-    "Procedures your team runs every shift to keep the home safe and well-documented.",
+    "These SOPs cover your home's daily routine, shift changes, and owner oversight.",
   medication:
     "Everything from receiving new orders to disposal — the full medication lifecycle.",
   "resident-care":
@@ -66,67 +66,69 @@ export default function SopChecklistPage() {
   }
 
   return (
-    <div className="flex" style={{ minHeight: "calc(100vh - 120px)", margin: "-32px -32px -32px -32px" }}>
-      {/* ── LEFT PANEL ──────────────────────────────────────────────── */}
-      <div className="w-72 shrink-0 border-r border-gray-200 bg-white">
-        <div className="sticky top-[60px] overflow-y-auto" style={{ maxHeight: "calc(100vh - 60px)" }}>
-          {/* Header */}
-          <div className="border-b border-gray-100 px-5 py-5">
-            <h1 className="text-lg font-700 text-gray-900">SOP Checklist</h1>
-            <p className="mt-0.5 text-[13px] text-gray-500">
-              0 of {totalItems} done
-            </p>
-            <div className="mt-2.5 h-1.5 w-full rounded-full bg-gray-100">
-              <div
-                className="h-full rounded-full bg-blue-500 transition-all"
-                style={{ width: "0%" }}
-              />
-            </div>
+    <div className="flex" style={{ minHeight: "calc(100vh - 120px)", margin: "-32px" }}>
+      {/* ── LEFT PANEL: Category sub-menu (260px, matches mockup) ──── */}
+      <div className="w-[260px] shrink-0 overflow-y-auto border-r border-gray-200 bg-white" style={{ paddingTop: 20, paddingBottom: 20 }}>
+        {/* Header */}
+        <div className="border-b border-gray-100 px-4 pb-4" style={{ marginBottom: 8 }}>
+          <p className="text-[13px] font-600 uppercase tracking-wide text-gray-400" style={{ letterSpacing: "0.5px", marginBottom: 8 }}>
+            SOP Checklist
+          </p>
+          <p className="mb-2 text-[13px] text-gray-500">
+            <strong className="font-700 text-blue-600">0</strong> of <strong className="font-700 text-blue-600">{totalItems}</strong> done
+          </p>
+          {/* Mini progress bar with gradient */}
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+            <div
+              className="h-full rounded-full"
+              style={{ width: "0%", background: "linear-gradient(90deg, #3b82f6, #60a5fa)" }}
+            />
           </div>
-
-          {/* Category list */}
-          <nav className="py-1">
-            {afhSopCategories.map((cat) => (
-              <CategoryRow
-                key={cat.key}
-                category={cat}
-                shortName={SHORT_NAMES[cat.key] ?? cat.label}
-                isActive={cat.key === selectedKey}
-                completedCount={0}
-                onClick={() => setSelectedKey(cat.key)}
-              />
-            ))}
-          </nav>
         </div>
+
+        {/* Category list */}
+        <nav>
+          {afhSopCategories.map((cat) => (
+            <CategoryRow
+              key={cat.key}
+              category={cat}
+              shortName={SHORT_NAMES[cat.key] ?? cat.label}
+              isActive={cat.key === selectedKey}
+              completedCount={0}
+              onClick={() => setSelectedKey(cat.key)}
+            />
+          ))}
+        </nav>
       </div>
 
-      {/* ── RIGHT PANEL ─────────────────────────────────────────────── */}
-      <div className="min-w-0 flex-1 overflow-y-auto bg-[#fefdf8] p-8">
+      {/* ── RIGHT PANEL: Checklist items (max-width 720px) ────────── */}
+      <div className="min-w-0 flex-1 overflow-y-auto bg-[#fefdf8]" style={{ padding: "28px 36px" }}>
         {/* Category header */}
-        <div className="mb-6">
-          <h2 className="flex items-center gap-2.5 text-xl font-700 text-gray-900">
-            <span className="text-xl">{selectedCategory.icon}</span>
+        <div style={{ marginBottom: 24 }}>
+          <h2 className="flex items-center text-[22px] font-700 tracking-tight text-gray-800" style={{ gap: 10, marginBottom: 4 }}>
+            <span className="text-[26px]">{selectedCategory.icon}</span>
             {selectedCategory.label}
           </h2>
-          <p className="mt-1.5 text-[14px] text-gray-500">
+          <p className="text-[14px] text-gray-500" style={{ marginLeft: 36 }}>
             {CATEGORY_DESCRIPTIONS[selectedKey] ?? ""}
           </p>
 
-          <div className="mt-4 flex items-center gap-3">
-            <div className="h-1.5 flex-1 rounded-full bg-gray-100">
+          {/* Category progress bar */}
+          <div className="flex items-center" style={{ gap: 12, marginLeft: 36, marginTop: 10 }}>
+            <div className="h-2 overflow-hidden rounded-full bg-gray-100" style={{ flex: 1, maxWidth: 200 }}>
               <div
-                className="h-full rounded-full bg-blue-500 transition-all"
+                className="h-full rounded-full bg-blue-400 transition-all"
                 style={{ width: "0%" }}
               />
             </div>
-            <span className="shrink-0 text-[13px] font-600 text-gray-500">
+            <span className="text-[13px] font-600 text-gray-500">
               0 of {items.length} done
             </span>
           </div>
         </div>
 
         {/* Items list */}
-        <div>
+        <div className="flex flex-col" style={{ gap: 2, maxWidth: 720 }}>
           {items.map((item) => (
             <ChecklistItemRow
               key={item.id}
@@ -163,33 +165,35 @@ function CategoryRow({
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full cursor-pointer items-center gap-3 px-5 py-2.5 text-left transition-colors ${
+      className={`flex w-full cursor-pointer items-center border-l-[3px] text-left transition-all ${
         isActive
-          ? "border-l-[3px] border-blue-500 bg-blue-50"
-          : "border-l-[3px] border-transparent hover:bg-gray-50"
+          ? "border-blue-500 bg-blue-50 font-600 text-blue-700"
+          : "border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-800"
       }`}
+      style={{ gap: 10, padding: "10px 16px", fontSize: 13 }}
     >
-      <span className="text-base leading-none">{category.icon}</span>
-      <div className="min-w-0 flex-1">
-        <p
-          className={`text-[13px] font-600 leading-snug ${
-            isActive ? "text-blue-700" : "text-gray-700"
-          }`}
+      <span className="shrink-0 text-center" style={{ fontSize: 18, width: 24 }}>
+        {category.icon}
+      </span>
+      <span className="min-w-0 flex-1" style={{ lineHeight: 1.3 }}>
+        <span className="block">{shortName}</span>
+        <span
+          className={`block text-[11px] font-400 ${isActive ? "text-blue-500" : "text-gray-400"}`}
+          style={{ marginTop: 1 }}
         >
-          {shortName}
-        </p>
-        <p className="mt-0.5 text-[11px] text-gray-400">
           {completedCount} of {total} done
-        </p>
-      </div>
+        </span>
+      </span>
+      {/* Badge */}
       <span
-        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+        className={`shrink-0 rounded-full text-[11px] font-600 ${
           allDone
             ? "bg-green-100 text-green-700"
             : inProgress
               ? "bg-blue-100 text-blue-600"
               : "bg-gray-100 text-gray-400"
         }`}
+        style={{ padding: "1px 7px" }}
       >
         {allDone ? "\u2713" : `${completedCount}/${total}`}
       </span>
@@ -205,28 +209,37 @@ function ChecklistItemRow({
   onStart: () => void;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-md px-4 py-4 transition-colors hover:bg-gray-50">
+    <div
+      className="flex items-start rounded-lg transition-colors hover:bg-white"
+      style={{ gap: 14, padding: 16 }}
+    >
       {/* Empty circle */}
-      <div className="mt-0.5 h-6 w-6 shrink-0 rounded-full border-2 border-gray-300" />
+      <div
+        className="mt-px shrink-0 rounded-full border-2 border-gray-300"
+        style={{ width: 26, height: 26 }}
+      />
 
       {/* Content */}
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium leading-snug text-gray-800">
+        <p className="text-[14px] font-500 leading-snug text-gray-800" style={{ marginBottom: 3 }}>
           {item.question}
         </p>
-        <p className="mt-1 text-xs leading-relaxed text-gray-400">
+        <p className="text-[13px] leading-snug text-gray-400">
           {item.why}
         </p>
       </div>
 
-      {/* Action button — solid blue primary */}
-      <button
-        type="button"
-        onClick={onStart}
-        className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
-      >
-        🎤 Start This SOP
-      </button>
+      {/* Action button */}
+      <div className="mt-px shrink-0">
+        <button
+          type="button"
+          onClick={onStart}
+          className="flex items-center whitespace-nowrap rounded-lg bg-blue-600 text-[13px] font-600 text-white transition-colors hover:bg-blue-700"
+          style={{ gap: 6, padding: "7px 14px" }}
+        >
+          🎤 Start This SOP
+        </button>
+      </div>
     </div>
   );
 }
