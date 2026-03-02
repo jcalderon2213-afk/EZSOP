@@ -5,6 +5,7 @@ const navItems = [
   { label: "Home", to: "/dashboard", emoji: "🏠" },
   { label: "My SOPs", to: "/sops", emoji: "📚" },
   { label: "Is Juan Ready?", to: "/readiness", emoji: "✅" },
+  { label: "Norma's Notes", to: "/norma-notes", emoji: "📝" },
 ];
 
 function checkActive(to: string, pathname: string): boolean {

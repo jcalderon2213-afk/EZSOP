@@ -14,6 +14,7 @@ import PracticeDebriefPage from "./pages/PracticeDebriefPage";
 import KnowledgeBuilderPage from "./pages/KnowledgeBuilderPage";
 import ComplianceLogPage from "./pages/ComplianceLogPage";
 import ManagerReadinessPage from "./pages/ManagerReadinessPage";
+import NormaNotesPage from "./pages/NormaNotesPage";
 import LoginPage from "./pages/LoginPage";
 import SignupPage from "./pages/SignupPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
@@ -42,6 +43,7 @@ function App() {
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
             <Route path="knowledge" element={<KnowledgeBuilderPage />} />
+            <Route path="norma-notes" element={<NormaNotesPage />} />
           </Route>
         </Route>
 

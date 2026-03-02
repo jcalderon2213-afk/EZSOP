@@ -633,6 +633,42 @@ export default function CreateSOPModal({
 
       const steps = fnData.data.steps as GeneratedStep[];
       dispatch({ type: "SET_GENERATED_STEPS", steps });
+
+      // Log transcript to Norma's Notes (fire-and-forget)
+      try {
+        const orgId = userProfile?.org_id;
+        if (orgId && state.transcript?.trim()) {
+          const trimmedTranscript = state.transcript.trim();
+
+          // 1. Create knowledge_item
+          const { data: kiData } = await supabase
+            .from("knowledge_items")
+            .insert({
+              org_id: orgId,
+              title: `Transcript: ${state.sopTitle}`,
+              description: `${state.buildMode === "guided" ? "Guided Q&A" : "Talk It Out"} transcript from SOP creation`,
+              type: "VOICE",
+              priority: "OPTIONAL",
+              level: "internal",
+              category: "documentation",
+              status: "provided",
+              provided_transcript: trimmedTranscript,
+            })
+            .select("id")
+            .single();
+
+          // 2. Create norma_notes entry
+          await supabase.from("norma_notes").insert({
+            org_id: orgId,
+            source_type: state.buildMode === "guided" ? "guided-mode" : "talk-it-out",
+            source_label: `SOP: ${state.sopTitle}`,
+            transcript: trimmedTranscript,
+            knowledge_item_id: kiData?.id ?? null,
+          });
+        }
+      } catch {
+        // Silent — transcript logging should never block SOP generation
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       setGenError(message);

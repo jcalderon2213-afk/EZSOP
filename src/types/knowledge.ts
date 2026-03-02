@@ -30,6 +30,17 @@ export interface KnowledgeItem {
   sort_order: number | null;
 }
 
+export interface NormaNote {
+  id: string;
+  org_id: string;
+  source_type: "talk-it-out" | "guided-mode" | "voice-source";
+  source_label: string;
+  transcript: string;
+  knowledge_item_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface KnowledgeBase {
   id: string;
   org_id: string;

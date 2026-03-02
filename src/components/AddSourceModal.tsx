@@ -208,6 +208,21 @@ export default function AddSourceModal({
 
       if (error) throw new Error(error.message);
 
+      // Log voice transcripts to Norma's Notes (fire-and-forget)
+      if (activeTab === "voice" && data?.id) {
+        try {
+          await supabase.from("norma_notes").insert({
+            org_id: orgId,
+            source_type: "voice-source" as const,
+            source_label: `Knowledge Source: ${name.trim() || "Untitled"}`,
+            transcript: transcript.trim(),
+            knowledge_item_id: data.id,
+          });
+        } catch {
+          // Silent — transcript logging should never block source creation
+        }
+      }
+
       onSourceAdded(data as KnowledgeItem);
       showToast("Source added!", "success");
       resetForm();
