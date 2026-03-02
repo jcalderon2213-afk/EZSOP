@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useSpeechRecognition from "../hooks/useSpeechRecognition";
 import { useAuth } from "../contexts/AuthContext";
@@ -6,21 +6,14 @@ import { useCreateSOP } from "../contexts/CreateSOPContext";
 import { useToast } from "../contexts/ToastContext";
 import { supabase } from "../lib/supabase";
 import { fetchKnowledgeContext } from "../lib/knowledgeContext";
+import { afhSopCategories, getChecklistByCategory } from "../data/afhSopChecklist";
+import type { AfhSopChecklistItem } from "../data/afhSopChecklist";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface CreateSOPModalProps {
   isOpen: boolean;
   onClose: () => void;
-}
-
-interface Recommendation {
-  id: string;
-  title: string;
-  category: string;
-  description: string;
-  sort_order: number;
-  status: "suggested" | "started" | "completed";
 }
 
 interface StepResource {
@@ -63,8 +56,6 @@ interface ModalState {
   sopTitle: string;
   sopCategory: string;
   sopDescription: string;
-  recommendations: Recommendation[];
-  recommendationsLoading: boolean;
   // Step 2+: existing fields
   buildMode: "guided" | "talk" | null;
   transcript: string;
@@ -84,8 +75,6 @@ interface ModalState {
 type ModalAction =
   | { type: "SET_STEP"; step: number }
   | { type: "SET_SOP_INFO"; title: string; category: string; description: string }
-  | { type: "SET_RECOMMENDATIONS"; recommendations: Recommendation[] }
-  | { type: "SET_RECOMMENDATIONS_LOADING"; loading: boolean }
   | { type: "SET_BUILD_MODE"; mode: ModalState["buildMode"] }
   | { type: "SET_TRANSCRIPT"; transcript: string }
   | { type: "APPEND_TRANSCRIPT"; chunk: string }
@@ -134,15 +123,6 @@ const CATEGORY_OPTIONS = [
   "Other",
 ];
 
-const CATEGORY_EMOJI: Record<string, string> = {
-  "Operations": "⚙️",
-  "HR & Training": "👥",
-  "Safety & Compliance": "🛡️",
-  "Client Care": "💝",
-  "Administrative": "📋",
-  "Other": "📌",
-};
-
 // ── Reducer ──────────────────────────────────────────────────────────────────
 
 const initialState: ModalState = {
@@ -150,8 +130,6 @@ const initialState: ModalState = {
   sopTitle: "",
   sopCategory: "",
   sopDescription: "",
-  recommendations: [],
-  recommendationsLoading: false,
   buildMode: "guided",
   transcript: "",
   generatedSteps: [],
@@ -177,10 +155,6 @@ function reducer(state: ModalState, action: ModalAction): ModalState {
         sopCategory: action.category,
         sopDescription: action.description,
       };
-    case "SET_RECOMMENDATIONS":
-      return { ...state, recommendations: action.recommendations };
-    case "SET_RECOMMENDATIONS_LOADING":
-      return { ...state, recommendationsLoading: action.loading };
     case "SET_BUILD_MODE":
       return { ...state, buildMode: action.mode };
     case "SET_TRANSCRIPT":
@@ -337,7 +311,6 @@ export default function CreateSOPModal({
       isDayInLifeRef.current = false;
       checklistItemIdRef.current = null;
       hasLoadedGuidedRef.current = false;
-      hasLoadedRecsRef.current = false;
       hasGeneratedRef.current = false;
       hasCheckedComplianceRef.current = false;
       return;
@@ -370,9 +343,8 @@ export default function CreateSOPModal({
   const { isRecording, duration, toggleRecording, isSupported, formatDuration } =
     useSpeechRecognition(handleTranscriptChunk);
 
-  // ── Step 1: Recommendations state ─────────────────────────────────────
-  const [recsError, setRecsError] = useState("");
-  const hasLoadedRecsRef = useRef(false);
+  // ── Step 1: Checklist search state ────────────────────────────────────
+  const [checklistSearch, setChecklistSearch] = useState("");
   const [customTitle, setCustomTitle] = useState("");
   const [customCategory, setCustomCategory] = useState(CATEGORY_OPTIONS[0]);
   const [customDescription, setCustomDescription] = useState("");
@@ -444,121 +416,21 @@ export default function CreateSOPModal({
     }
   }
 
-  // ── Load/generate recommendations when entering Step 1 ────────────────
-  useEffect(() => {
-    if (currentStep !== 1 || hasLoadedRecsRef.current || !isOpen) return;
-    if (state.recommendations.length > 0) return;
-    hasLoadedRecsRef.current = true;
-    loadRecommendations();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStep, isOpen]);
-
-  async function loadRecommendations() {
-    const orgId = userProfile?.org_id;
-    if (!orgId) return;
-
-    setRecsError("");
-    dispatch({ type: "SET_RECOMMENDATIONS_LOADING", loading: true });
-
-    try {
-      // Check for existing recommendations
-      const { data, error: fetchError } = await supabase
-        .from("sop_recommendations")
-        .select("id, title, category, description, sort_order, status")
-        .eq("org_id", orgId)
-        .is("deleted_at", null)
-        .order("sort_order", { ascending: true });
-
-      if (fetchError) throw fetchError;
-
-      if (data && data.length > 0) {
-        dispatch({ type: "SET_RECOMMENDATIONS", recommendations: data as Recommendation[] });
-        dispatch({ type: "SET_RECOMMENDATIONS_LOADING", loading: false });
-        return;
-      }
-
-      // No existing recs — generate via AI
-      const [orgResult, gbResult, knowledgeContext] = await Promise.all([
-        supabase
-          .from("orgs")
-          .select("industry_type, state, county")
-          .eq("id", orgId)
-          .single(),
-        supabase
-          .from("governing_bodies")
-          .select("name, level")
-          .eq("org_id", orgId)
-          .is("deleted_at", null),
-        fetchKnowledgeContext(orgId),
-      ]);
-
-      if (orgResult.error) throw orgResult.error;
-      if (gbResult.error) throw gbResult.error;
-
-      const org = orgResult.data;
-      const governingBodies = gbResult.data;
-
-      const { data: fnData, error: fnError } = await supabase.functions.invoke(
-        "ai-gateway",
-        {
-          body: {
-            action: "recommend-sops",
-            payload: {
-              org_id: orgId,
-              industry_type: org.industry_type,
-              state: org.state,
-              county: org.county,
-              governing_bodies: governingBodies,
-              knowledge_context: knowledgeContext,
-            },
-          },
-        },
-      );
-
-      if (fnError) throw fnError;
-      if (!fnData?.success) throw new Error(fnData?.error ?? "Unknown error from AI gateway");
-
-      const recs = fnData.data.recommendations as Array<{
-        title: string;
-        category: string;
-        description: string;
-        sort_order: number;
-      }>;
-
-      // Insert into sop_recommendations
-      const rows = recs.map((rec) => ({
-        org_id: orgId,
-        title: rec.title,
-        category: rec.category,
-        description: rec.description,
-        sort_order: rec.sort_order,
-        status: "suggested",
-      }));
-
-      const { error: insertError } = await supabase
-        .from("sop_recommendations")
-        .insert(rows);
-
-      if (insertError) throw insertError;
-
-      // Re-fetch to get the inserted rows with IDs
-      const { data: inserted, error: refetchError } = await supabase
-        .from("sop_recommendations")
-        .select("id, title, category, description, sort_order, status")
-        .eq("org_id", orgId)
-        .is("deleted_at", null)
-        .order("sort_order", { ascending: true });
-
-      if (refetchError) throw refetchError;
-
-      dispatch({ type: "SET_RECOMMENDATIONS", recommendations: inserted as Recommendation[] });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setRecsError(message);
-    } finally {
-      dispatch({ type: "SET_RECOMMENDATIONS_LOADING", loading: false });
-    }
-  }
+  // ── Step 1: Filtered checklist items (from static data) ──────────────
+  const filteredChecklist = useMemo(() => {
+    const q = checklistSearch.toLowerCase().trim();
+    return afhSopCategories
+      .map((cat) => {
+        const items = getChecklistByCategory(cat.key).filter(
+          (item) =>
+            !q ||
+            item.question.toLowerCase().includes(q) ||
+            item.category.toLowerCase().includes(q),
+        );
+        return { ...cat, items };
+      })
+      .filter((cat) => cat.items.length > 0);
+  }, [checklistSearch]);
 
   // Auto-generate when entering Step 4 (Review Steps)
   useEffect(() => {
@@ -746,12 +618,19 @@ export default function CreateSOPModal({
     }
   }
 
-  function handleSelectRecommendation(rec: Recommendation) {
+  function handleSelectChecklistItem(item: AfhSopChecklistItem) {
+    const raw = item.question.replace(/\?$/, "");
+    const title = raw
+      .replace(/^How do you /i, "")
+      .replace(/^What do you do /i, "")
+      .replace(/^What are your /i, "");
+    const sopTitle = title.charAt(0).toUpperCase() + title.slice(1);
+    checklistItemIdRef.current = item.id;
     dispatch({
       type: "SET_SOP_INFO",
-      title: rec.title,
-      category: rec.category,
-      description: rec.description,
+      title: sopTitle,
+      category: item.category,
+      description: "",
     });
     goNext();
   }
@@ -972,112 +851,95 @@ export default function CreateSOPModal({
           {/* ── Step content ─────────────────────────────────────── */}
           {currentStep === 1 ? (
             /* ── Step 1: Pick a Procedure ─────────────────────────── */
-            <div className="mt-6">
-              {state.recommendationsLoading ? (
-                <div className="py-10 text-center">
-                  <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-[#e0e0e0] border-t-primary" />
-                  <p className="mt-4 text-[15px] font-600 text-text">
-                    Generating recommendations for your business...
-                  </p>
-                  <p className="mt-1 text-[13px] text-text-muted">
-                    This may take a few seconds.
-                  </p>
-                </div>
-              ) : recsError ? (
-                <div className="rounded-[10px] border-2 border-[#fecaca] bg-[#fef2f2] px-5 py-4 text-[14px] text-warn">
-                  <p>{recsError}</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      hasLoadedRecsRef.current = false;
-                      loadRecommendations();
-                    }}
-                    className="mt-2 text-[14px] font-700 text-primary hover:underline"
-                  >
-                    Retry
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {/* Recommendations list */}
-                  {state.recommendations.length > 0 && (
-                    <div className="max-h-[340px] space-y-2.5 overflow-y-auto pr-1">
-                      {state.recommendations.map((rec) => (
+            <div className="mt-4">
+              {/* Search */}
+              <input
+                type="text"
+                value={checklistSearch}
+                onChange={(e) => setChecklistSearch(e.target.value)}
+                placeholder="Search procedures..."
+                className="mb-4 w-full rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-2.5 text-[14px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+              />
+
+              {/* Grouped checklist items */}
+              <div className="max-h-[340px] space-y-4 overflow-y-auto pr-1">
+                {filteredChecklist.map((cat) => (
+                  <div key={cat.key}>
+                    <h4 className="sticky top-0 z-10 bg-card pb-1.5 pt-1 text-[13px] font-700 text-text-muted">
+                      {cat.icon} {cat.label}
+                    </h4>
+                    <div className="space-y-1">
+                      {cat.items.map((item) => (
                         <button
-                          key={rec.id}
+                          key={item.id}
                           type="button"
-                          onClick={() => handleSelectRecommendation(rec)}
-                          className="flex w-full items-start gap-4 rounded-[12px] border-2 border-[#e0e0e0] bg-white p-5 text-left transition-all hover:border-primary hover:bg-primary-light"
+                          onClick={() => handleSelectChecklistItem(item)}
+                          className="flex w-full items-center gap-3 rounded-[8px] border border-[#e0e0e0] bg-white px-4 py-2.5 text-left transition-all hover:border-primary hover:bg-primary-light"
                         >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-[15px] font-700 text-text">
-                                {CATEGORY_EMOJI[rec.category] ?? "📌"} {rec.title}
-                              </h4>
-                              <span className="shrink-0 rounded-full bg-purple-light px-2.5 py-0.5 text-[11px] font-700 text-purple">
-                                {rec.category}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-[13px] text-text-muted line-clamp-2">
-                              {rec.description}
-                            </p>
-                          </div>
-                          <span className="mt-1 shrink-0 text-[14px] font-700 text-primary">
+                          <span className="min-w-0 flex-1 text-[14px] text-text">
+                            {item.question}
+                          </span>
+                          <span className="shrink-0 text-[13px] font-600 text-primary">
                             Select &rarr;
                           </span>
                         </button>
                       ))}
                     </div>
-                  )}
-
-                  {/* Divider */}
-                  <div className="relative my-6">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t-2 border-[#e0e0e0]" />
-                    </div>
-                    <div className="relative flex justify-center">
-                      <span className="bg-card px-4 text-[13px] font-600 text-text-muted">
-                        Or write your own
-                      </span>
-                    </div>
                   </div>
+                ))}
+                {filteredChecklist.length === 0 && (
+                  <p className="py-6 text-center text-[14px] text-text-muted">
+                    No matching procedures found.
+                  </p>
+                )}
+              </div>
 
-                  {/* Custom SOP form */}
-                  <div className="space-y-3">
-                    <input
-                      type="text"
-                      value={customTitle}
-                      onChange={(e) => setCustomTitle(e.target.value)}
-                      placeholder="SOP Title (required)"
-                      className="w-full rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-3 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                    />
-                    <select
-                      value={customCategory}
-                      onChange={(e) => setCustomCategory(e.target.value)}
-                      className="w-full rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-3 text-[15px] text-text outline-none focus:border-primary"
-                    >
-                      {CATEGORY_OPTIONS.map((cat) => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                    <textarea
-                      value={customDescription}
-                      onChange={(e) => setCustomDescription(e.target.value)}
-                      rows={2}
-                      placeholder="Brief description (optional)"
-                      className="w-full resize-y rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-3 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleCustomContinue}
-                      disabled={!customTitle.trim()}
-                      className="rounded-[8px] bg-primary px-6 py-3 text-[15px] font-700 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
-                    >
-                      Continue &rarr;
-                    </button>
-                  </div>
-                </>
-              )}
+              {/* Divider */}
+              <div className="relative my-6">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t-2 border-[#e0e0e0]" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-card px-4 text-[13px] font-600 text-text-muted">
+                    Or write your own
+                  </span>
+                </div>
+              </div>
+
+              {/* Custom SOP form */}
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={customTitle}
+                  onChange={(e) => setCustomTitle(e.target.value)}
+                  placeholder="SOP Title (required)"
+                  className="w-full rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-3 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                />
+                <select
+                  value={customCategory}
+                  onChange={(e) => setCustomCategory(e.target.value)}
+                  className="w-full rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-3 text-[15px] text-text outline-none focus:border-primary"
+                >
+                  {CATEGORY_OPTIONS.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+                <textarea
+                  value={customDescription}
+                  onChange={(e) => setCustomDescription(e.target.value)}
+                  rows={2}
+                  placeholder="Brief description (optional)"
+                  className="w-full resize-y rounded-[8px] border-2 border-[#e0e0e0] bg-white px-4 py-3 text-[15px] text-text outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                />
+                <button
+                  type="button"
+                  onClick={handleCustomContinue}
+                  disabled={!customTitle.trim()}
+                  className="rounded-[8px] bg-primary px-6 py-3 text-[15px] font-700 text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+                >
+                  Continue &rarr;
+                </button>
+              </div>
             </div>
           ) : currentStep === 2 ? (
             /* ── Step 2: How Do You Want to Build It? ─────────────── */
